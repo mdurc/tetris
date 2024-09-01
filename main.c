@@ -10,7 +10,7 @@
 #define SQUARE_SIZE 30
 
 #define GRID_VERTICAL_SIZE 20
-#define GRID_HORIZONTAL_SIZE 12
+#define GRID_HORIZONTAL_SIZE 13
 
 #define LATERAL_SPEED 10
 #define VERTICAL_SPEED 10
@@ -39,6 +39,7 @@ typedef struct Game {
 
     uint32_t curr_piece_x;
     uint32_t curr_piece_y;
+    uint8_t stop_piece;
 
     uint8_t game_over;
     uint8_t pause;
@@ -56,6 +57,7 @@ void InitializeGame(Game* game);
 void UpdateGame(Game* game);
 void DrawGame(const Game* const game);
 void GeneratePiece(Square p[4][4]);
+uint8_t CheckPieceCollision(Game* game, Square p[4][4], uint8_t x, uint8_t y, int8_t dx, int8_t dy);
 
 //------------------------------------------------------------------------------------
 // Entry Point
@@ -88,9 +90,10 @@ int main(void) {
 // Function Definitions
 //------------------------------------------------------------------------------------
 void InitializeGame(Game* game) {
-    int i, j;
-    game->curr_piece_x = 0;
+    uint8_t i, j;
+    game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
     game->curr_piece_y = 0;
+    game->stop_piece = 0;
     game->game_over = 0;
     game->pause = 0;
     game->level = 1;
@@ -107,51 +110,80 @@ void InitializeGame(Game* game) {
         }
     }
 
+    GeneratePiece(game->piece);
     GeneratePiece(game->next_piece);
 }
 
 void UpdateGame(Game* game) {
-    int i;
 
-    // TODO: only move to next piece on solidification
-    Square* curr = &game->piece[0][0];
-    Square* next = &game->next_piece[0][0];
-    // A piece is 4x4 size
-    for(i=0;i<16;++i){ *(curr+i)= *(next+i); }
+    if(game->stop_piece || game->curr_piece_y == (GRID_VERTICAL_SIZE-1)){
+        game->grid[game->curr_piece_y][game->curr_piece_x] = TAKEN;
 
+        uint8_t i,j, found_empty;
 
-    // Erase old location before applying gravity
+        Square* curr = &game->piece[0][0];
+        Square* next = &game->next_piece[0][0];
+
+        // Check if a line clear has occurred, update game stats
+        for(i=0; i<GRID_VERTICAL_SIZE; ++i){
+            found_empty = 0;
+            for(j=0; j<GRID_HORIZONTAL_SIZE; ++j){
+                if(game->grid[i][j] == EMPTY){
+                    found_empty = 1;
+                    break;
+                }
+            }
+            if(!found_empty){
+                // clear this line
+                for(j=0;j<GRID_HORIZONTAL_SIZE;++j){
+                    game->grid[i][j] = CLEARING;
+                }
+            }
+        }
+
+        // Spawn new piece (a piece is 4x4 size)
+        for(i=0;i<16;++i){ *(curr+i)= *(next+i); }
+        GeneratePiece(game->next_piece);
+        game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
+        game->curr_piece_y = 0;
+        game->stop_piece = 0;
+    }
+
+    if(CheckPieceCollision(game, game->piece, game->curr_piece_x, game->curr_piece_y, 0, 1)){
+        // Going to collide with something on the bottom
+        game->stop_piece = 1;
+        return;
+    }
+
+    // Erase old location before applying gravity or moving down
     if(game->curr_piece_y < (GRID_VERTICAL_SIZE-1) && ++gravity_count >= gravity){
         game->grid[game->curr_piece_y][game->curr_piece_x] = EMPTY;
         ++game->curr_piece_y;
         gravity_count = 0;
-    }
-
-    // Check for keyboard input, horizontal movement
-    // TODO: implement up arrow for flipping the piece
-    if(IsKeyDown(KEY_LEFT) && game->curr_piece_x > 0){
-        game->grid[game->curr_piece_y][game->curr_piece_x] = EMPTY;
-        --game->curr_piece_x;
-    }
-    if(IsKeyDown(KEY_RIGHT) && game->curr_piece_x < (GRID_HORIZONTAL_SIZE-1)){
-        game->grid[game->curr_piece_y][game->curr_piece_x] = EMPTY;
-        ++game->curr_piece_x;
-    }
-    if(IsKeyDown(KEY_DOWN) && game->curr_piece_y < (GRID_VERTICAL_SIZE-1)){
+    } else if(IsKeyDown(KEY_DOWN) && game->curr_piece_y < (GRID_VERTICAL_SIZE-1)){
         game->grid[game->curr_piece_y][game->curr_piece_x] = EMPTY;
         ++game->curr_piece_y;
     }
+
+    // Check for keyboard input, horizontal movement
+    if(!CheckPieceCollision(game, game->piece, game->curr_piece_x, game->curr_piece_y, -1, 0) &&
+        IsKeyPressed(KEY_LEFT) && game->curr_piece_x > 0){
+        game->grid[game->curr_piece_y][game->curr_piece_x] = EMPTY;
+        --game->curr_piece_x;
+    }
+    if(!CheckPieceCollision(game, game->piece, game->curr_piece_x, game->curr_piece_y, 1, 0) &&
+        IsKeyPressed(KEY_RIGHT) && game->curr_piece_x < (GRID_HORIZONTAL_SIZE-1)){
+        game->grid[game->curr_piece_y][game->curr_piece_x] = EMPTY;
+        ++game->curr_piece_x;
+    }
     
-    assert(game->curr_piece_y < GRID_VERTICAL_SIZE);
-    assert(game->curr_piece_x < GRID_HORIZONTAL_SIZE);
-    assert(game->curr_piece_x >= 0);
     game->grid[game->curr_piece_y][game->curr_piece_x] = FALLING;
 }
 
 void DrawGame(const Game* game) {
-    int i,j;
-    int offset_y = (window_height - GRID_VERTICAL_SIZE*SQUARE_SIZE)/2;
-    int offset_x = (window_width - GRID_HORIZONTAL_SIZE*SQUARE_SIZE)/2;
+    uint8_t i,j;
+    uint32_t offset_y = (window_height - GRID_VERTICAL_SIZE*SQUARE_SIZE)/2;
+    uint32_t offset_x = (window_width - GRID_HORIZONTAL_SIZE*SQUARE_SIZE)/2;
 
     // DRAW ALL SQUARES
     for(i=0;i<GRID_VERTICAL_SIZE;++i){
@@ -160,6 +192,8 @@ void DrawGame(const Game* game) {
                 DrawRectangle(j*SQUARE_SIZE + offset_x, i*SQUARE_SIZE + offset_y, SQUARE_SIZE, SQUARE_SIZE, BLUE); 
             } else if(game->grid[i][j] == FALLING){
                 DrawRectangle(j*SQUARE_SIZE + offset_x, i*SQUARE_SIZE + offset_y, SQUARE_SIZE, SQUARE_SIZE, LIGHTGRAY); 
+            } else if(game->grid[i][j] == CLEARING){
+                DrawRectangle(j*SQUARE_SIZE + offset_x, i*SQUARE_SIZE + offset_y, SQUARE_SIZE, SQUARE_SIZE, RED); 
             }
 
         }
@@ -178,5 +212,15 @@ void DrawGame(const Game* game) {
 
 
 void GeneratePiece(Square p[4][4]){
-    p[0][1] = 1;
+    p[0][0] = 1;
+}
+
+
+uint8_t CheckPieceCollision(Game* game, Square p[4][4], uint8_t x, uint8_t y, int8_t dx, int8_t dy){
+    // TODO: introduce logic here
+    if(((x+dx) >= 0 && (x+dx) < GRID_HORIZONTAL_SIZE) &&
+        ((y+dy) >= 0 && (y+dy) < GRID_VERTICAL_SIZE)){
+        return game->grid[y+dy][x+dx] == TAKEN;
+    }
+    return 0;
 }
