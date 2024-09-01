@@ -3,6 +3,7 @@
 #include <raylib.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 //------------------------------------------------------------------------------------
 // Definitions
@@ -11,11 +12,6 @@
 
 #define GRID_VERTICAL_SIZE 20
 #define GRID_HORIZONTAL_SIZE 13
-
-#define LATERAL_SPEED 10
-#define VERTICAL_SPEED 10
-
-#define CLEARING_TIME 33
 
 typedef enum Square { EMPTY, TAKEN, FALLING, CLEARING } Square;
 
@@ -26,6 +22,11 @@ static uint32_t window_height = 850;
 static uint32_t gravity_count = 0;
 static uint32_t gravity = 30;
 
+static uint32_t clear_line_count = 0;
+static uint32_t clearing_time = 15;
+
+static uint8_t filled_lines = 0;
+static uint8_t filled_rows[4];
 
 static Color fading_color = (Color){255, 255, 255, 255};
 
@@ -46,8 +47,6 @@ typedef struct Game {
 
     uint32_t level;
     uint32_t lines;
-
-    uint32_t clearing_line_timer;
 } Game;
 
 //------------------------------------------------------------------------------------
@@ -98,7 +97,6 @@ void InitializeGame(Game* game) {
     game->pause = 0;
     game->level = 1;
     game->lines = 0;
-    game->clearing_line_timer = 0;
 
     for (i = 0; i < GRID_VERTICAL_SIZE; ++i) {
         for (j = 0; j < GRID_HORIZONTAL_SIZE; ++j) {
@@ -116,10 +114,14 @@ void InitializeGame(Game* game) {
 
 void UpdateGame(Game* game) {
 
+    int8_t i,j,k, found_empty;
+
+    // Update the counters
+    ++gravity_count;
+    ++clear_line_count;
+
     if(game->stop_piece || game->curr_piece_y == (GRID_VERTICAL_SIZE-1)){
         game->grid[game->curr_piece_y][game->curr_piece_x] = TAKEN;
-
-        uint8_t i,j, found_empty;
 
         Square* curr = &game->piece[0][0];
         Square* next = &game->next_piece[0][0];
@@ -133,10 +135,14 @@ void UpdateGame(Game* game) {
                     break;
                 }
             }
-            if(!found_empty){
+            if(!found_empty && game->grid[i][0]!=CLEARING){
+                assert((filled_lines+1)<=4);
+                filled_rows[filled_lines++] = i;
                 // clear this line
-                for(j=0;j<GRID_HORIZONTAL_SIZE;++j){
-                    game->grid[i][j] = CLEARING;
+                clear_line_count = 0;
+                ++game->lines;
+                for(k=0;k<GRID_HORIZONTAL_SIZE;++k){
+                    game->grid[i][k] = CLEARING;
                 }
             }
         }
@@ -144,11 +150,42 @@ void UpdateGame(Game* game) {
         // Spawn new piece (a piece is 4x4 size)
         for(i=0;i<16;++i){ *(curr+i)= *(next+i); }
         GeneratePiece(game->next_piece);
-        game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
+        static int x = 0;
+        game->curr_piece_x = x++;
+        if(x==(GRID_HORIZONTAL_SIZE-1)){
+            x=0;
+        }
+        while(game->grid[0][game->curr_piece_x] == TAKEN){
+            game->curr_piece_x = rand() % GRID_HORIZONTAL_SIZE;
+        }
         game->curr_piece_y = 0;
         game->stop_piece = 0;
     }
 
+    // Clear levels
+    if(filled_lines>0 && clear_line_count>=clearing_time){
+        clear_line_count = 0;
+        // Make all squares empty
+        for(i=0; i<filled_lines; ++i){
+            for(j=0; j<GRID_VERTICAL_SIZE; ++j){
+                game->grid[filled_rows[i]][j] = EMPTY;
+            }
+        }
+        filled_lines = 0;
+
+        // Move everything down 1, start from the bottom
+        for(i=GRID_VERTICAL_SIZE-2; i>=0; --i){
+            for(j=0; j<GRID_HORIZONTAL_SIZE; ++j){
+                if(game->grid[i][j] == TAKEN){
+                    game->grid[i+1][j] = TAKEN;
+                    game->grid[i][j] = EMPTY;
+                }
+            }
+        }
+    }
+
+
+    // Check if the current piece is going to land on another piece
     if(CheckPieceCollision(game, game->piece, game->curr_piece_x, game->curr_piece_y, 0, 1)){
         // Going to collide with something on the bottom
         game->stop_piece = 1;
@@ -156,7 +193,7 @@ void UpdateGame(Game* game) {
     }
 
     // Erase old location before applying gravity or moving down
-    if(game->curr_piece_y < (GRID_VERTICAL_SIZE-1) && ++gravity_count >= gravity){
+    if(game->curr_piece_y < (GRID_VERTICAL_SIZE-1) && gravity_count >= gravity){
         game->grid[game->curr_piece_y][game->curr_piece_x] = EMPTY;
         ++game->curr_piece_y;
         gravity_count = 0;
