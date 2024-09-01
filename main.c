@@ -40,8 +40,8 @@ typedef struct Game {
     Square piece[4][4];
     Square next_piece[4][4];
 
-    uint32_t curr_piece_x;
-    uint32_t curr_piece_y;
+    int32_t curr_piece_x;
+    int32_t curr_piece_y;
     uint8_t stop_piece;
 
     uint8_t game_over;
@@ -126,6 +126,7 @@ void UpdateGame(Game* game) {
     ++gravity_count;
     ++clear_line_count;
 
+    // Check if the current piece is going to land on another piece
     if(game->stop_piece || game->curr_piece_y == (GRID_VERTICAL_SIZE-1)){
         SetPieceInGrid(game, 1);
 
@@ -190,7 +191,6 @@ void UpdateGame(Game* game) {
     }
 
 
-    // Check if the current piece is going to land on another piece
     if(CheckPieceCollision(game, 0, 1)){
         // Going to collide with something on the bottom
         game->stop_piece = 1;
@@ -208,11 +208,11 @@ void UpdateGame(Game* game) {
     }
 
     // Check for keyboard input, horizontal movement
-    if(IsKeyPressed(KEY_LEFT) && !CheckPieceCollision(game, -1, 0)){
+    if(IsKeyDown(KEY_LEFT) && !CheckPieceCollision(game, -1, 0)){
         SetPieceInGrid(game, 0);
         --game->curr_piece_x;
     }
-    if(IsKeyPressed(KEY_RIGHT) && !CheckPieceCollision(game, 1, 0)){
+    if(IsKeyDown(KEY_RIGHT) && !CheckPieceCollision(game, 1, 0)){
         SetPieceInGrid(game, 0);
         ++game->curr_piece_x;
     }
@@ -254,49 +254,62 @@ void DrawGame(const Game* game) {
 
 
 void GeneratePiece(Square p[4][4]){
-    // 2 is falling
-    if(frame == 0){
-        p[0][0] = 2;
-        p[0][1] = 0;
-        p[0][2] = 0;
-        p[0][3] = 0;
-        p[1][0] = 0;
-        p[1][1] = 0;
-        p[1][2] = 0;
-        p[1][3] = 0;
-        p[2][0] = 0;
-        p[2][1] = 0;
-        p[2][2] = 0;
-        p[2][3] = 0;
-        p[3][0] = 0;
-        p[3][1] = 0;
-        p[3][2] = 0;
-        p[3][3] = 0;
-    }else{
-        p[0][0] = 2;
-        p[0][1] = 2;
-        p[0][2] = 2;
-        p[0][3] = 2;
-        p[1][0] = 0;
-        p[1][1] = 0;
-        p[1][2] = 0;
-        p[1][3] = 0;
-        p[2][0] = 0;
-        p[2][1] = 0;
-        p[2][2] = 0;
-        p[2][3] = 0;
-        p[3][0] = 0;
-        p[3][1] = 0;
-        p[3][2] = 0;
-        p[3][3] = 0;
+    int8_t i,j;
+    int8_t index = frame % 7;
+    // 6 different piece shapes. 2 is where the FALLING piece is
+    Square opts[7][4][4] = {
+        // Rod
+        {{0, 0, 0, 0},
+         {0, 0, 0, 0},
+         {2, 2, 2, 2},
+         {0, 0, 0, 0}},
+        // Square
+        {{0, 0, 0, 0},
+         {0, 2, 2, 0},
+         {0, 2, 2, 0},
+         {0, 0, 0, 0}},
+        // L
+        {{0, 0, 0, 0},
+         {2, 2, 2, 0},
+         {0, 0, 2, 0},
+         {0, 0, 0, 0}},
+        // Backwards L
+        {{0, 0, 0, 0},
+         {2, 2, 2, 0},
+         {2, 0, 0, 0},
+         {0, 0, 0, 0}},
+        // Upwards Z
+        {{0, 0, 0, 0},
+         {0, 2, 2, 0},
+         {2, 2, 0, 0},
+         {0, 0, 0, 0}},
+        // Plus
+        {{0, 0, 0, 0},
+         {2, 2, 2, 0},
+         {0, 2, 0, 0},
+         {0, 0, 0, 0}},
+        // Downwards Z
+        {{0, 0, 0, 0},
+         {2, 2, 0, 0},
+         {0, 2, 2, 0},
+         {0, 0, 0, 0}},
+    };
+
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 4; ++j) {
+            p[i][j] = opts[index][i][j];
+        }
     }
 }
 
 
+// Return 0 for no collisions
+// Return 1 for block collisions
+// Return 2 for border collisions
 int8_t CheckPieceCollision(Game* game, int8_t dx, int8_t dy){
     // TODO: introduce logic here
-    uint8_t x = game->curr_piece_x;
-    uint8_t y = game->curr_piece_y;
+    int32_t x = game->curr_piece_x;
+    int32_t y = game->curr_piece_y;
 
     int8_t i,j;
     int8_t found_taken = 0;
@@ -319,7 +332,8 @@ int8_t CheckPieceCollision(Game* game, int8_t dx, int8_t dy){
                         continue;
                 }
             }else{
-                found_taken = 1;
+                found_taken = 2;
+                break;
             }
         }
         if(found_taken) break;
