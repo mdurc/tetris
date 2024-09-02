@@ -138,6 +138,7 @@ void UpdateGame(Game* game) {
 
     // Check if the current piece is going to land on another piece
     if(game->stop_piece || game->curr_piece_y == (GRID_VERTICAL_SIZE-1)){
+        // Set the piece
         SetPieceInGrid(game, 1);
 
         // Check if a line clear has occurred, update game stats
@@ -168,6 +169,9 @@ void UpdateGame(Game* game) {
         if(CheckPieceCollision(game, 0, 0)){
             game->game_over = 1;
             printf("Game Over\n");
+
+            // show the piece that caused the game over:
+            SetPieceInGrid(game, 1);
             return;
         }
     }
@@ -192,7 +196,6 @@ void UpdateGame(Game* game) {
             // check if the entire row below is empty
             int8_t row_underneath = i+1;
             while(row_underneath <= (GRID_VERTICAL_SIZE-1) && IsFilledRow(game, row_underneath, EMPTY) && !IsFilledRow(game,row_underneath-1,EMPTY)){
-                printf("MOVING %d row downwards\n", row_underneath-1);
                 for(j = 0; j < GRID_HORIZONTAL_SIZE; ++j) {
                     // only move down if it is taken
                     if(game->grid[row_underneath-1][j] == TAKEN){
@@ -209,12 +212,13 @@ void UpdateGame(Game* game) {
     if(CheckPieceCollision(game, 0, 1)){
         // Going to collide with something on the bottom
         game->stop_piece = 1;
+        // go to next piece
         return;
     }
 
+    // TODO: add "c" for saving piece for another round
 
     // Piece rotation
-    // TODO: Alter CheckPieceCollision for ValidRotation(int8_t direction)
     if(IsKeyPressed(KEY_UP) && AttemptRotation(game)){
         SetPieceInGrid(game, 0);
         RotatePiece(game);
@@ -273,13 +277,20 @@ void DrawGame(const Game* game) {
         DrawLine(offset_x, i*SQUARE_SIZE + offset_y, GRID_HORIZONTAL_SIZE*SQUARE_SIZE + offset_x, i*SQUARE_SIZE + offset_y, MAROON);
     }
 
+    // DRAWING THE "Next Piece" Showcase
+    //DrawRectangle((window_width - 300) / 2, (window_height - 150) / 2, 300, 150, DARKGRAY);
+
+
     if(game->game_over){
-        DrawRectangle((window_width - 300) / 2, (window_height - 150) / 2, 300, 150, DARKGRAY);
+        int32_t width = SQUARE_SIZE*10;
+        int32_t height = SQUARE_SIZE*5;
+        int32_t font_size = SQUARE_SIZE + SQUARE_SIZE/3;
+        DrawRectangle((window_width - width) / 2, (window_height - height) / 2, width, height, DARKGRAY);
 
         DrawText("GAME OVER", 
-                (window_width - MeasureText("GAME OVER", 40)) / 2, 
-                (window_height - 150) / 2 + (150 - 40) / 2, 
-                40, RAYWHITE);
+                (window_width - MeasureText("GAME OVER", font_size)) / 2, 
+                (window_height - height) / 2 + (height - font_size) / 2, 
+                font_size, RAYWHITE);
     }
 }
 
@@ -327,39 +338,7 @@ void GeneratePiece(Square p[4][4]){
     };
 
 
-    // TODO: remove
-    switch(index){
-        case 0:
-            printf("0,  Rod\n");
-            break;
-        case 1:
-            printf("1,  Square\n");
-            break;
-        case 2:
-            printf("2,  L\n");
-            break;
-        case 3:
-            printf("3,  Backwards L\n");
-            break;
-        case 4:
-            printf("4,  Upwards Z\n");
-            break;
-        case 5:
-            printf("5,  Plus\n");
-            break;
-        case 6:
-            printf("6,  Downwards Z\n");
-            break;
-        default:
-            printf("Invalid index\n");
-            break;
-    }
-
-    for (i = 0; i < 4; ++i) {
-        for (j = 0; j < 4; ++j) {
-            p[i][j] = opts[index][i][j];
-        }
-    }
+    CopyPieceFromTo(opts[index], p);
 }
 
 
