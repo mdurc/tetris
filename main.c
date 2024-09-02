@@ -28,11 +28,6 @@ static uint32_t clearing_time = 15;
 static uint8_t filled_lines = 0;
 static uint8_t filled_rows[4];
 
-// TODO
-static Color fading_color = (Color){255, 255, 255, 255};
-
-static int32_t frame = 0;
-
 // Whether or not the pieces place immedieatly or after a delay when hitting the bottom or another piece
 static int8_t add_lock_delay = 1;
 
@@ -45,14 +40,13 @@ typedef struct Game {
     Square next_piece[4][4];
     Square held_piece[4][4];
 
-    uint8_t curr_piece_type;
     int32_t curr_piece_x;
     int32_t curr_piece_y;
+    uint8_t curr_piece_type;
     uint8_t stop_moving_down;
     uint8_t holding_piece;
 
     uint8_t game_over;
-    uint8_t pause;
 
     uint32_t level;
     uint32_t lines;
@@ -65,10 +59,10 @@ void InitializeGame(Game* game);
 void UpdateGame(Game* game);
 void DrawGame(const Game* const game);
 void GeneratePiece(Game* game, Square p[4][4]);
-void SetPieceInGrid(Game* game, int8_t type);
+void SetPieceInGrid(Game* game, enum Square state);
 
-int8_t IsFilledRow(Game* game, int8_t row, enum Square state);
-int8_t CheckPieceCollision(Game* game, int8_t dx, int8_t dy);
+int8_t IsFilledRow(Game* game, uint8_t row, enum Square state);
+int8_t CheckPieceCollision(Game* game, int32_t dx, int32_t dy);
 int8_t AttemptRotation(Game* game);
 void RotatePiece(Game* game);
 void CopyPieceFromTo(Square a[4][4], Square b[4][4]);
@@ -105,14 +99,13 @@ int main(void) {
 // Function Definitions
 //------------------------------------------------------------------------------------
 void InitializeGame(Game* game) {
-    uint8_t i, j;
+    uint32_t i, j;
     game->curr_piece_type = -1; // No current piece yet
     game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
     game->curr_piece_y = -1; // Make starting piece location to be flush with the top of grid. Check piece layouts.
     game->stop_moving_down = 0;
     game->holding_piece = 0;
     game->game_over = 0;
-    game->pause = 0;
     game->level = 1;
     game->lines = 0;
 
@@ -128,18 +121,15 @@ void InitializeGame(Game* game) {
     }
 
     GeneratePiece(game, game->piece);
-    // TODO: show the next piece in the corner of the ui
-    ++frame;
     GeneratePiece(game, game->next_piece);
 }
 
 void UpdateGame(Game* game) {
+    // not unsigned for negative values
+    int32_t i,j;
+
     // don't update game if it is game over
     if(game->game_over) return;
-
-    ++frame;
-
-    int8_t i,j,k;
 
     // Update the counters
     ++gravity_count;
@@ -152,7 +142,7 @@ void UpdateGame(Game* game) {
         // Going to collide with something on the bottom
         if(!add_lock_delay || gravity_count >= gravity){
             // Set the piece
-            SetPieceInGrid(game, 1);
+            SetPieceInGrid(game, TAKEN);
 
             // Check if a line clear has occurred, update game stats
             for(i=0; i<GRID_VERTICAL_SIZE; ++i){
@@ -170,8 +160,8 @@ void UpdateGame(Game* game) {
                         }
                         gravity-=2;
                     }
-                    for(k=0;k<GRID_HORIZONTAL_SIZE;++k){
-                        game->grid[i][k] = CLEARING;
+                    for(j=0;j<GRID_HORIZONTAL_SIZE;++j){
+                        game->grid[i][j] = CLEARING;
                     }
                 }
             }
@@ -179,7 +169,7 @@ void UpdateGame(Game* game) {
             CopyPieceFromTo(game->next_piece, game->piece);
             GeneratePiece(game, game->next_piece);
 
-            // TODO: make random spawn locations
+            // game->curr_piece_x = rand() % GRID_HORIZONTAL_SIZE; // for random spawn
             game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
 
             // Spawn at the top (shape may not start at 0,0 of piece shape)
@@ -190,7 +180,7 @@ void UpdateGame(Game* game) {
                 printf("Game Over\n");
 
                 // show the piece that caused the game over:
-                SetPieceInGrid(game, 1);
+                SetPieceInGrid(game, TAKEN);
                 return;
             }
 
@@ -214,6 +204,7 @@ void UpdateGame(Game* game) {
 
         // FALLING ROWS AFTER CLEAR: =======
         // If the line below a piece is fully empty, fall down.
+        // assert that i is not unsigned
         for(i = GRID_VERTICAL_SIZE - 2; i >= 0; --i) {
             // check if the entire row below is empty
             int8_t row_underneath = i+1;
@@ -232,7 +223,7 @@ void UpdateGame(Game* game) {
 
     if(IsKeyPressed(KEY_C)){
         // Either swap with the currently held piece, or save this piece
-        SetPieceInGrid(game, 0);
+        SetPieceInGrid(game, EMPTY);
         if(game->holding_piece){
             // swap
             Square temp[4][4];
@@ -250,7 +241,7 @@ void UpdateGame(Game* game) {
 
     // Piece rotation
     if(IsKeyPressed(KEY_UP) && AttemptRotation(game)){
-        SetPieceInGrid(game, 0);
+        SetPieceInGrid(game, EMPTY);
         RotatePiece(game);
     }
 
@@ -259,15 +250,15 @@ void UpdateGame(Game* game) {
     // Or if add_lock_delay is false, the block will have already solidified if it was unable to move down any more.
     if(!game->stop_moving_down){
         if(gravity_count >= gravity){
-            SetPieceInGrid(game, 0);
+            SetPieceInGrid(game, EMPTY);
             ++game->curr_piece_y;
             gravity_count = 0;
         } else if(IsKeyDown(KEY_DOWN)){
-            SetPieceInGrid(game, 0);
+            SetPieceInGrid(game, EMPTY);
             ++game->curr_piece_y;
         } else if(IsKeyPressed(KEY_SPACE)){
             // Instantly fall
-            SetPieceInGrid(game, 0);
+            SetPieceInGrid(game, EMPTY);
             while(!CheckPieceCollision(game, 0, 1)){
                 ++game->curr_piece_y;
             }
@@ -279,21 +270,21 @@ void UpdateGame(Game* game) {
     // Check for keyboard input, horizontal movement
     if(IsKeyPressed(KEY_LEFT) && !CheckPieceCollision(game, -1, 0)){
         game->stop_moving_down = 0;
-        SetPieceInGrid(game, 0);
+        SetPieceInGrid(game, EMPTY);
         --game->curr_piece_x;
     }
     if(IsKeyPressed(KEY_RIGHT) && !CheckPieceCollision(game, 1, 0)){
         game->stop_moving_down = 0;
-        SetPieceInGrid(game, 0);
+        SetPieceInGrid(game, EMPTY);
         ++game->curr_piece_x;
     }
     
     // Set falling piece
-    SetPieceInGrid(game, 2);
+    SetPieceInGrid(game, FALLING);
 }
 
 void DrawGame(const Game* game) {
-    uint8_t i,j;
+    uint32_t i,j;
     uint32_t offset_y = (window_height - GRID_VERTICAL_SIZE*SQUARE_SIZE)/2;
     uint32_t offset_x = (window_width - GRID_HORIZONTAL_SIZE*SQUARE_SIZE)/2;
 
@@ -340,7 +331,7 @@ void DrawGame(const Game* game) {
     }
 
     // DRAWING GAME STATS
-    int32_t stat_font_size = SQUARE_SIZE*(2/3.0f);
+    uint32_t stat_font_size = SQUARE_SIZE*(2/3.0f);
     DrawText(TextFormat("Level: %d", game->level), 
              window_width - MeasureText(TextFormat("Level: %d", game->level), stat_font_size) - offset_x, 
              offset_y-SQUARE_SIZE, stat_font_size, DARKGRAY);
@@ -349,9 +340,9 @@ void DrawGame(const Game* game) {
 
 
     if(game->game_over){
-        int32_t width = SQUARE_SIZE*10;
-        int32_t height = SQUARE_SIZE*5;
-        int32_t font_size = SQUARE_SIZE + SQUARE_SIZE/3;
+        uint32_t width = SQUARE_SIZE*10;
+        uint32_t height = SQUARE_SIZE*5;
+        uint32_t font_size = SQUARE_SIZE + SQUARE_SIZE/3;
         DrawRectangle((window_width - width) / 2, (window_height - height) / 2, width, height, DARKGRAY);
 
         DrawText("GAME OVER", 
@@ -363,8 +354,7 @@ void DrawGame(const Game* game) {
 
 
 void GeneratePiece(Game* game, Square p[4][4]){
-    int8_t i,j;
-    int8_t index = rand() % 7;
+    uint8_t index = rand() % 7;
     while(index == game->curr_piece_type){
         index = rand() % 7;
     }
@@ -415,12 +405,12 @@ void GeneratePiece(Game* game, Square p[4][4]){
 // Return 0 for no collisions
 // Return 1 for block collisions
 // Return 2 for border collisions
-int8_t CheckPieceCollision(Game* game, int8_t dx, int8_t dy){
+int8_t CheckPieceCollision(Game* game, int32_t dx, int32_t dy){
     // TODO: introduce logic here
     int32_t x = game->curr_piece_x;
     int32_t y = game->curr_piece_y;
 
-    int8_t i,j;
+    int32_t i,j;
     int8_t found_taken = 0;
     for(i=0;i<4;++i){
         for(j=0;j<4;++j){
@@ -453,10 +443,9 @@ int8_t CheckPieceCollision(Game* game, int8_t dx, int8_t dy){
 }
 
 
-// types -> 0:EMPTY, 1:TAKEN, 2: FALLING, 
-void SetPieceInGrid(Game* game, int8_t type){
-    int8_t i,j;
-    int8_t x,y;
+void SetPieceInGrid(Game* game, enum Square state){
+    int32_t i,j;
+    int32_t x,y;
     for(i=0;i<4;++i){
         for(j=0;j<4;++j){
             if(game->piece[i][j] != FALLING) continue;
@@ -464,8 +453,7 @@ void SetPieceInGrid(Game* game, int8_t type){
             x = game->curr_piece_x + j;
             y = game->curr_piece_y + i;
             if((y >= 0 && y < GRID_VERTICAL_SIZE) && (x >= 0 && x < GRID_HORIZONTAL_SIZE)){
-                game->grid[y][x] =
-                    type == 0 ? EMPTY : type == 1 ? TAKEN : FALLING;
+                game->grid[y][x] = state;
             }
         }
     }
@@ -476,18 +464,14 @@ void SetPieceInGrid(Game* game, int8_t type){
 // Automatically rotate clockwise
 int8_t AttemptRotation(Game* game){
     // Save current orientation and attempt a rotation and check for collisions
-    int8_t i,j, ret;
+    int8_t ret;
     Square temp[4][4];
+
     CopyPieceFromTo(game->piece, temp);
     RotatePiece(game);
 
-    if(CheckPieceCollision(game,0,0) != 0){
-        // INVALID ROTATION
-        ret = 0;
-    }else{
-        // VALID ROTATION
-        ret = 1;
-    }
+    // Valid if there is not a collision
+    ret = !CheckPieceCollision(game,0,0);
 
     // revert attempt
     CopyPieceFromTo(temp, game->piece);
@@ -495,7 +479,7 @@ int8_t AttemptRotation(Game* game){
 }
 
 void RotatePiece(Game* game){
-    int8_t i, j;
+    uint32_t i, j;
     Square rotated[4][4];
 
     for (i = 0; i < 4; ++i) {
@@ -508,9 +492,9 @@ void RotatePiece(Game* game){
 }
 
 
-int8_t IsFilledRow(Game* game, int8_t row, enum Square state){
+int8_t IsFilledRow(Game* game, uint8_t row, enum Square state){
     assert(row < GRID_VERTICAL_SIZE);
-    int8_t i;
+    uint32_t i;
     for(i = 0; i < GRID_HORIZONTAL_SIZE; ++i) {
         if(game->grid[row][i] != state) {
             return 0;
@@ -520,7 +504,7 @@ int8_t IsFilledRow(Game* game, int8_t row, enum Square state){
 }
 
 void CopyPieceFromTo(Square a[4][4], Square b[4][4]){
-    int8_t i, j;
+    uint32_t i, j;
     for (i = 0; i < 4; ++i) {
         for (j = 0; j < 4; ++j) {
             b[i][j] = a[i][j];
