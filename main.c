@@ -5,13 +5,13 @@
 #include <stdlib.h>
 #include <time.h>
 
+static uint32_t SQUARE_SIZE = 30;
+
 //------------------------------------------------------------------------------------
 // Definitions
 //------------------------------------------------------------------------------------
-#define SQUARE_SIZE 30
-
 #define GRID_VERTICAL_SIZE 20
-#define GRID_HORIZONTAL_SIZE 13
+#define GRID_HORIZONTAL_SIZE 10
 
 typedef enum Square { EMPTY, TAKEN, FALLING, CLEARING} Square;
 
@@ -70,7 +70,9 @@ void CopyPieceFromTo(Square a[4][4], Square b[4][4]);
 //------------------------------------------------------------------------------------
 // Entry Point
 //------------------------------------------------------------------------------------
-int main(void) {
+int main(int32_t argc, char** argv) {
+    if(argc==2){ SQUARE_SIZE = atoi(argv[1]); }
+
     srand(time(NULL));
 
     Game game;
