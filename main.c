@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 //------------------------------------------------------------------------------------
 // Definitions
@@ -58,13 +59,19 @@ void InitializeGame(Game* game);
 void UpdateGame(Game* game);
 void DrawGame(const Game* const game);
 void GeneratePiece(Square p[4][4]);
-int8_t CheckPieceCollision(Game* game, int8_t dx, int8_t dy);
 void SetPieceInGrid(Game* game, int8_t type);
+
+int8_t IsFilledRow(Game* game, int8_t row, enum Square state);
+int8_t CheckPieceCollision(Game* game, int8_t dx, int8_t dy);
+int8_t AttemptRotation(Game* game);
+void RotatePiece(Game* game);
+void CopyPieceFromTo(Square a[4][4], Square b[4][4]);
 
 //------------------------------------------------------------------------------------
 // Entry Point
 //------------------------------------------------------------------------------------
 int main(void) {
+    srand(time(0));
 
     Game game;
     InitializeGame(&game);
@@ -94,7 +101,7 @@ int main(void) {
 void InitializeGame(Game* game) {
     uint8_t i, j;
     game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
-    game->curr_piece_y = 0;
+    game->curr_piece_y = -1; // Make starting piece location to be flush with the top of grid. Check piece layouts.
     game->stop_piece = 0;
     game->game_over = 0;
     game->pause = 0;
@@ -118,9 +125,12 @@ void InitializeGame(Game* game) {
 }
 
 void UpdateGame(Game* game) {
+    // don't update game if it is game over
+    if(game->game_over) return;
+
     ++frame;
 
-    int8_t i,j,k, found_empty;
+    int8_t i,j,k;
 
     // Update the counters
     ++gravity_count;
@@ -132,14 +142,9 @@ void UpdateGame(Game* game) {
 
         // Check if a line clear has occurred, update game stats
         for(i=0; i<GRID_VERTICAL_SIZE; ++i){
-            found_empty = 0;
-            for(j=0; j<GRID_HORIZONTAL_SIZE; ++j){
-                if(game->grid[i][j] == EMPTY){
-                    found_empty = 1;
-                    break;
-                }
-            }
-            if(!found_empty && game->grid[i][0]!=CLEARING){
+
+            // Check if the line is full of TAKEN's 
+            if(IsFilledRow(game, i, TAKEN)){
                 assert((filled_lines+1)<=4);
                 filled_rows[filled_lines++] = i;
                 // clear this line
@@ -151,24 +156,26 @@ void UpdateGame(Game* game) {
             }
         }
 
-        Square* curr = &game->piece[0][0];
-        Square* next = &game->next_piece[0][0];
-        // Spawn new piece (a piece is 4x4 size)
-        for(i=0;i<16;++i){ *(curr+i)= *(next+i); }
+        CopyPieceFromTo(game->next_piece, game->piece);
         GeneratePiece(game->next_piece);
 
-        game->curr_piece_x = rand() % GRID_HORIZONTAL_SIZE;
-        game->curr_piece_y = 0;
+        // TODO: make random spawn locations
+        game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
+
+        // Spawn at the top (shape may not start at 0,0 of piece shape)
+        game->curr_piece_y = -1;
         game->stop_piece = 0;
-        while(CheckPieceCollision(game, 0, 0)){
-            game->curr_piece_x = rand() % GRID_HORIZONTAL_SIZE;
+        if(CheckPieceCollision(game, 0, 0)){
+            game->game_over = 1;
+            printf("Game Over\n");
+            return;
         }
     }
 
     // Clear levels
     if(filled_lines>0 && clear_line_count>=clearing_time){
         clear_line_count = 0;
-        // Make all squares empty
+        // Make all squares that are being cleared, now empty
         for(i=0; i<filled_lines; ++i){
             for(j=0; j<GRID_HORIZONTAL_SIZE; ++j){
                 assert(filled_rows[i] >= 0 && filled_rows[i] < GRID_VERTICAL_SIZE);
@@ -179,13 +186,21 @@ void UpdateGame(Game* game) {
         }
         filled_lines = 0;
 
-        // Move everything down 1, start from the bottom
-        for(i=GRID_VERTICAL_SIZE-2; i>=0; --i){
-            for(j=0; j<GRID_HORIZONTAL_SIZE; ++j){
-                if(game->grid[i][j] == TAKEN){
-                    game->grid[i+1][j] = TAKEN;
-                    game->grid[i][j] = EMPTY;
+        // FALLING ROWS AFTER CLEAR: =======
+        // If the line below a piece is fully empty, fall down.
+        for(i = GRID_VERTICAL_SIZE - 2; i >= 0; --i) {
+            // check if the entire row below is empty
+            int8_t row_underneath = i+1;
+            while(row_underneath <= (GRID_VERTICAL_SIZE-1) && IsFilledRow(game, row_underneath, EMPTY) && !IsFilledRow(game,row_underneath-1,EMPTY)){
+                printf("MOVING %d row downwards\n", row_underneath-1);
+                for(j = 0; j < GRID_HORIZONTAL_SIZE; ++j) {
+                    // only move down if it is taken
+                    if(game->grid[row_underneath-1][j] == TAKEN){
+                        game->grid[row_underneath][j] = game->grid[row_underneath-1][j];
+                        game->grid[row_underneath-1][j] = EMPTY;
+                    }
                 }
+                ++row_underneath;
             }
         }
     }
@@ -195,6 +210,14 @@ void UpdateGame(Game* game) {
         // Going to collide with something on the bottom
         game->stop_piece = 1;
         return;
+    }
+
+
+    // Piece rotation
+    // TODO: Alter CheckPieceCollision for ValidRotation(int8_t direction)
+    if(IsKeyPressed(KEY_UP) && AttemptRotation(game)){
+        SetPieceInGrid(game, 0);
+        RotatePiece(game);
     }
 
     // Erase old location before applying gravity or moving
@@ -208,16 +231,15 @@ void UpdateGame(Game* game) {
     }
 
     // Check for keyboard input, horizontal movement
-    if(IsKeyDown(KEY_LEFT) && !CheckPieceCollision(game, -1, 0)){
+    if(IsKeyPressed(KEY_LEFT) && !CheckPieceCollision(game, -1, 0)){
         SetPieceInGrid(game, 0);
         --game->curr_piece_x;
     }
-    if(IsKeyDown(KEY_RIGHT) && !CheckPieceCollision(game, 1, 0)){
+    if(IsKeyPressed(KEY_RIGHT) && !CheckPieceCollision(game, 1, 0)){
         SetPieceInGrid(game, 0);
         ++game->curr_piece_x;
     }
     
-
     // Set falling piece
     SetPieceInGrid(game, 2);
 }
@@ -250,18 +272,27 @@ void DrawGame(const Game* game) {
         // Horizontal lines
         DrawLine(offset_x, i*SQUARE_SIZE + offset_y, GRID_HORIZONTAL_SIZE*SQUARE_SIZE + offset_x, i*SQUARE_SIZE + offset_y, MAROON);
     }
+
+    if(game->game_over){
+        DrawRectangle((window_width - 300) / 2, (window_height - 150) / 2, 300, 150, DARKGRAY);
+
+        DrawText("GAME OVER", 
+                (window_width - MeasureText("GAME OVER", 40)) / 2, 
+                (window_height - 150) / 2 + (150 - 40) / 2, 
+                40, RAYWHITE);
+    }
 }
 
 
 void GeneratePiece(Square p[4][4]){
     int8_t i,j;
-    int8_t index = frame % 7;
+    int8_t index = rand() % 7;
     // 6 different piece shapes. 2 is where the FALLING piece is
     Square opts[7][4][4] = {
         // Rod
         {{0, 0, 0, 0},
-         {0, 0, 0, 0},
          {2, 2, 2, 2},
+         {0, 0, 0, 0},
          {0, 0, 0, 0}},
         // Square
         {{0, 0, 0, 0},
@@ -294,6 +325,35 @@ void GeneratePiece(Square p[4][4]){
          {0, 2, 2, 0},
          {0, 0, 0, 0}},
     };
+
+
+    // TODO: remove
+    switch(index){
+        case 0:
+            printf("0,  Rod\n");
+            break;
+        case 1:
+            printf("1,  Square\n");
+            break;
+        case 2:
+            printf("2,  L\n");
+            break;
+        case 3:
+            printf("3,  Backwards L\n");
+            break;
+        case 4:
+            printf("4,  Upwards Z\n");
+            break;
+        case 5:
+            printf("5,  Plus\n");
+            break;
+        case 6:
+            printf("6,  Downwards Z\n");
+            break;
+        default:
+            printf("Invalid index\n");
+            break;
+    }
 
     for (i = 0; i < 4; ++i) {
         for (j = 0; j < 4; ++j) {
@@ -358,6 +418,63 @@ void SetPieceInGrid(Game* game, int8_t type){
                 game->grid[y][x] =
                     type == 0 ? EMPTY : type == 1 ? TAKEN : FALLING;
             }
+        }
+    }
+}
+
+
+
+// Automatically rotate clockwise
+int8_t AttemptRotation(Game* game){
+    // Save current orientation and attempt a rotation and check for collisions
+    int8_t i,j, ret;
+    Square temp[4][4];
+    CopyPieceFromTo(game->piece, temp);
+    RotatePiece(game);
+
+    if(CheckPieceCollision(game,0,0) != 0){
+        printf("Invalid rotation\n");
+        ret = 0;
+    }else{
+        printf("VALID rotation\n");
+        ret = 1;
+    }
+
+    // revert attempt
+    CopyPieceFromTo(temp, game->piece);
+    return ret;
+}
+
+void RotatePiece(Game* game){
+    int8_t i, j;
+    Square rotated[4][4];
+
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 4; ++j) {
+            rotated[i][j] = game->piece[3 - j][i];
+        }
+    }
+
+    CopyPieceFromTo(rotated, game->piece);
+}
+
+
+int8_t IsFilledRow(Game* game, int8_t row, enum Square state){
+    assert(row < GRID_VERTICAL_SIZE);
+    int8_t i;
+    for(i = 0; i < GRID_HORIZONTAL_SIZE; ++i) {
+        if(game->grid[row][i] != state) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void CopyPieceFromTo(Square a[4][4], Square b[4][4]){
+    int8_t i, j;
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 4; ++j) {
+            b[i][j] = a[i][j];
         }
     }
 }
