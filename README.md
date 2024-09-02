@@ -24,5 +24,6 @@
 #### Custom (optional) arguments
 - `SQUARE_SIZE`: Scales all ui based on size. default is 30.
 
-#### Build and run
+#### Compile and run
 - `gcc main.c -lraylib && ./a.out`
+- Specifying custom `SQUARE_SIZE`: `gcc main.c -lraylib && ./a.out 15`
