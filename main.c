@@ -255,14 +255,24 @@ void UpdateGame(Game* game) {
     }
 
     // Erase old location before applying gravity or moving
+    // Dont have to check bounds because stop_moving_down will toggle when there is a piece or wall beneath the block.
+    // Or if add_lock_delay is false, the block will have already solidified if it was unable to move down any more.
     if(!game->stop_moving_down){
-        if(game->curr_piece_y < (GRID_VERTICAL_SIZE-1) && gravity_count >= gravity){
+        if(gravity_count >= gravity){
             SetPieceInGrid(game, 0);
             ++game->curr_piece_y;
             gravity_count = 0;
-        } else if(IsKeyDown(KEY_DOWN) && game->curr_piece_y < (GRID_VERTICAL_SIZE-1)){
+        } else if(IsKeyDown(KEY_DOWN)){
             SetPieceInGrid(game, 0);
             ++game->curr_piece_y;
+        } else if(IsKeyPressed(KEY_SPACE)){
+            // Instantly fall
+            SetPieceInGrid(game, 0);
+            while(!CheckPieceCollision(game, 0, 1)){
+                ++game->curr_piece_y;
+            }
+            // So that it places automatically on next frame, despite add_lock_delay
+            gravity_count = gravity;
         }
     }
 
