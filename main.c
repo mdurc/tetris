@@ -40,10 +40,13 @@ typedef struct Game {
     Square grid[GRID_VERTICAL_SIZE][GRID_HORIZONTAL_SIZE];
     Square piece[4][4];
     Square next_piece[4][4];
+    Square held_piece[4][4];
 
+    uint8_t curr_piece_type;
     int32_t curr_piece_x;
     int32_t curr_piece_y;
     uint8_t stop_piece;
+    uint8_t holding_piece;
 
     uint8_t game_over;
     uint8_t pause;
@@ -58,7 +61,7 @@ typedef struct Game {
 void InitializeGame(Game* game);
 void UpdateGame(Game* game);
 void DrawGame(const Game* const game);
-void GeneratePiece(Square p[4][4]);
+void GeneratePiece(Game* game, Square p[4][4]);
 void SetPieceInGrid(Game* game, int8_t type);
 
 int8_t IsFilledRow(Game* game, int8_t row, enum Square state);
@@ -71,7 +74,7 @@ void CopyPieceFromTo(Square a[4][4], Square b[4][4]);
 // Entry Point
 //------------------------------------------------------------------------------------
 int main(void) {
-    srand(time(0));
+    srand(2);
 
     Game game;
     InitializeGame(&game);
@@ -100,9 +103,11 @@ int main(void) {
 //------------------------------------------------------------------------------------
 void InitializeGame(Game* game) {
     uint8_t i, j;
+    game->curr_piece_type = -1; // No current piece yet
     game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
     game->curr_piece_y = -1; // Make starting piece location to be flush with the top of grid. Check piece layouts.
     game->stop_piece = 0;
+    game->holding_piece = 0;
     game->game_over = 0;
     game->pause = 0;
     game->level = 1;
@@ -113,15 +118,16 @@ void InitializeGame(Game* game) {
             if(i<4 && j<4){
                 game->piece[i][j] = EMPTY;
                 game->next_piece[i][j] = EMPTY;
+                game->held_piece[i][j] = EMPTY;
             }
             game->grid[i][j] = EMPTY;
         }
     }
 
-    GeneratePiece(game->piece);
+    GeneratePiece(game, game->piece);
     // TODO: show the next piece in the corner of the ui
     ++frame;
-    GeneratePiece(game->next_piece);
+    GeneratePiece(game, game->next_piece);
 }
 
 void UpdateGame(Game* game) {
@@ -158,7 +164,7 @@ void UpdateGame(Game* game) {
         }
 
         CopyPieceFromTo(game->next_piece, game->piece);
-        GeneratePiece(game->next_piece);
+        GeneratePiece(game, game->next_piece);
 
         // TODO: make random spawn locations
         game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
@@ -216,7 +222,23 @@ void UpdateGame(Game* game) {
         return;
     }
 
-    // TODO: add "c" for saving piece for another round
+    if(IsKeyPressed(KEY_C)){
+        // Either swap with the currently held piece, or save this piece
+        SetPieceInGrid(game, 0);
+        if(game->holding_piece){
+            // swap
+            Square temp[4][4];
+            CopyPieceFromTo(game->piece, temp);
+            CopyPieceFromTo(game->held_piece, game->piece);
+            CopyPieceFromTo(temp, game->held_piece);
+        }else{
+            // save current piece
+            game->holding_piece = 1;
+            CopyPieceFromTo(game->piece, game->held_piece);
+            CopyPieceFromTo(game->next_piece, game->piece);
+            GeneratePiece(game, game->next_piece);
+        }
+    }
 
     // Piece rotation
     if(IsKeyPressed(KEY_UP) && AttemptRotation(game)){
@@ -278,7 +300,22 @@ void DrawGame(const Game* game) {
     }
 
     // DRAWING THE "Next Piece" Showcase
-    //DrawRectangle((window_width - 300) / 2, (window_height - 150) / 2, 300, 150, DARKGRAY);
+    for(i=0; i<4; ++i){
+        for(j=0; j<4; ++j){
+            if(game->next_piece[i][j] == FALLING){
+                DrawRectangle((j*SQUARE_SIZE + GRID_HORIZONTAL_SIZE*SQUARE_SIZE + offset_x+SQUARE_SIZE), i*SQUARE_SIZE + offset_y, SQUARE_SIZE, SQUARE_SIZE, LIGHTGRAY);
+            }
+        }
+    }
+
+    // DRAWING THE "Held Piece" Showcase
+    for(i=0; i<4; ++i){
+        for(j=0; j<4; ++j){
+            if(game->held_piece[i][j] == FALLING){
+                DrawRectangle(offset_x - SQUARE_SIZE*2 - j*SQUARE_SIZE, i*SQUARE_SIZE + offset_y, SQUARE_SIZE, SQUARE_SIZE, LIGHTGRAY);
+            }
+        }
+    }
 
 
     if(game->game_over){
@@ -295,9 +332,13 @@ void DrawGame(const Game* game) {
 }
 
 
-void GeneratePiece(Square p[4][4]){
+void GeneratePiece(Game* game, Square p[4][4]){
     int8_t i,j;
     int8_t index = rand() % 7;
+    while(index == game->curr_piece_type){
+        index = rand() % 7;
+    }
+    game->curr_piece_type = index;
     // 6 different piece shapes. 2 is where the FALLING piece is
     Square opts[7][4][4] = {
         // Rod
@@ -336,7 +377,6 @@ void GeneratePiece(Square p[4][4]){
          {0, 2, 2, 0},
          {0, 0, 0, 0}},
     };
-
 
     CopyPieceFromTo(opts[index], p);
 }
@@ -412,10 +452,10 @@ int8_t AttemptRotation(Game* game){
     RotatePiece(game);
 
     if(CheckPieceCollision(game,0,0) != 0){
-        printf("Invalid rotation\n");
+        // INVALID ROTATION
         ret = 0;
     }else{
-        printf("VALID rotation\n");
+        // VALID ROTATION
         ret = 1;
     }
 
