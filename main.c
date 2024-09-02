@@ -74,7 +74,7 @@ void CopyPieceFromTo(Square a[4][4], Square b[4][4]);
 // Entry Point
 //------------------------------------------------------------------------------------
 int main(void) {
-    srand(2);
+    srand(time(NULL));
 
     Game game;
     InitializeGame(&game);
@@ -157,6 +157,10 @@ void UpdateGame(Game* game) {
                 // clear this line
                 clear_line_count = 0;
                 ++game->lines;
+                if(game->lines%10 == 0){
+                    ++game->level;
+                    gravity-=2;
+                }
                 for(k=0;k<GRID_HORIZONTAL_SIZE;++k){
                     game->grid[i][k] = CLEARING;
                 }
@@ -316,6 +320,14 @@ void DrawGame(const Game* game) {
             }
         }
     }
+
+    // DRAWING GAME STATS
+    int32_t stat_font_size = SQUARE_SIZE*(2/3.0f);
+    DrawText(TextFormat("Level: %d", game->level), 
+             window_width - MeasureText(TextFormat("Level: %d", game->level), stat_font_size) - offset_x, 
+             offset_y-SQUARE_SIZE, stat_font_size, DARKGRAY);
+
+    DrawText(TextFormat("Lines: %d", game->lines), offset_x, offset_y-SQUARE_SIZE, stat_font_size, DARKGRAY);
 
 
     if(game->game_over){
