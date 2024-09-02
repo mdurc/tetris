@@ -1,4 +1,3 @@
-#include <assert.h>
 #include <raylib.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -151,7 +150,6 @@ void UpdateGame(Game* game) {
 
                 // Check if the line is full of TAKEN's 
                 if(IsFilledRow(game, i, TAKEN)){
-                    assert((filled_lines+1)<=4);
                     filled_rows[filled_lines++] = i;
                     // clear this line
                     clear_line_count = 0;
@@ -196,9 +194,6 @@ void UpdateGame(Game* game) {
         // Make all squares that are being cleared, now empty
         for(i=0; i<filled_lines; ++i){
             for(j=0; j<GRID_HORIZONTAL_SIZE; ++j){
-                assert(filled_rows[i] >= 0 && filled_rows[i] < GRID_VERTICAL_SIZE);
-                assert(j >= 0 && j < GRID_VERTICAL_SIZE);
-                assert(game->grid[filled_rows[i]][j] == CLEARING);
                 game->grid[filled_rows[i]][j] = EMPTY;
             }
         }
@@ -206,7 +201,6 @@ void UpdateGame(Game* game) {
 
         // FALLING ROWS AFTER CLEAR: =======
         // If the line below a piece is fully empty, fall down.
-        // assert that i is not unsigned
         for(i = GRID_VERTICAL_SIZE - 2; i >= 0; --i) {
             // check if the entire row below is empty
             int8_t row_underneath = i+1;
@@ -408,7 +402,6 @@ void GeneratePiece(Game* game, Square p[4][4]){
 // Return 1 for block collisions
 // Return 2 for border collisions
 int8_t CheckPieceCollision(Game* game, int32_t dx, int32_t dy){
-    // TODO: introduce logic here
     int32_t x = game->curr_piece_x;
     int32_t y = game->curr_piece_y;
 
@@ -495,7 +488,6 @@ void RotatePiece(Game* game){
 
 
 int8_t IsFilledRow(Game* game, uint8_t row, enum Square state){
-    assert(row < GRID_VERTICAL_SIZE);
     uint32_t i;
     for(i = 0; i < GRID_HORIZONTAL_SIZE; ++i) {
         if(game->grid[row][i] != state) {
