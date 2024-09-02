@@ -31,7 +31,10 @@ static uint8_t filled_rows[4];
 // TODO
 static Color fading_color = (Color){255, 255, 255, 255};
 
-static int frame = 0;
+static int32_t frame = 0;
+
+// Whether or not the pieces place immedieatly or after a delay when hitting the bottom or another piece
+static int8_t add_lock_delay = 1;
 
 //------------------------------------------------------------------------------------
 // Game Structure
@@ -45,7 +48,7 @@ typedef struct Game {
     uint8_t curr_piece_type;
     int32_t curr_piece_x;
     int32_t curr_piece_y;
-    uint8_t stop_piece;
+    uint8_t stop_moving_down;
     uint8_t holding_piece;
 
     uint8_t game_over;
@@ -106,7 +109,7 @@ void InitializeGame(Game* game) {
     game->curr_piece_type = -1; // No current piece yet
     game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
     game->curr_piece_y = -1; // Make starting piece location to be flush with the top of grid. Check piece layouts.
-    game->stop_piece = 0;
+    game->stop_moving_down = 0;
     game->holding_piece = 0;
     game->game_over = 0;
     game->pause = 0;
@@ -143,46 +146,55 @@ void UpdateGame(Game* game) {
     ++clear_line_count;
 
     // Check if the current piece is going to land on another piece
-    if(game->stop_piece || game->curr_piece_y == (GRID_VERTICAL_SIZE-1)){
-        // Set the piece
-        SetPieceInGrid(game, 1);
+    if(CheckPieceCollision(game, 0, 1) || game->curr_piece_y == (GRID_VERTICAL_SIZE-1)){
+        if(add_lock_delay) game->stop_moving_down = 1;
+        // Wait until gravity would make it collide before placing it
+        // Going to collide with something on the bottom
+        if(!add_lock_delay || gravity_count >= gravity){
+            // Set the piece
+            SetPieceInGrid(game, 1);
 
-        // Check if a line clear has occurred, update game stats
-        for(i=0; i<GRID_VERTICAL_SIZE; ++i){
+            // Check if a line clear has occurred, update game stats
+            for(i=0; i<GRID_VERTICAL_SIZE; ++i){
 
-            // Check if the line is full of TAKEN's 
-            if(IsFilledRow(game, i, TAKEN)){
-                assert((filled_lines+1)<=4);
-                filled_rows[filled_lines++] = i;
-                // clear this line
-                clear_line_count = 0;
-                ++game->lines;
-                if(game->lines%10 == 0){
-                    ++game->level;
-                    gravity-=2;
-                }
-                for(k=0;k<GRID_HORIZONTAL_SIZE;++k){
-                    game->grid[i][k] = CLEARING;
+                // Check if the line is full of TAKEN's 
+                if(IsFilledRow(game, i, TAKEN)){
+                    assert((filled_lines+1)<=4);
+                    filled_rows[filled_lines++] = i;
+                    // clear this line
+                    clear_line_count = 0;
+                    ++game->lines;
+                    if(game->lines%10 == 0){
+                        if(++game->level > 5){ // 50 ines
+                            add_lock_delay = 0; // no more delay to place blocks
+                        }
+                        gravity-=2;
+                    }
+                    for(k=0;k<GRID_HORIZONTAL_SIZE;++k){
+                        game->grid[i][k] = CLEARING;
+                    }
                 }
             }
-        }
 
-        CopyPieceFromTo(game->next_piece, game->piece);
-        GeneratePiece(game, game->next_piece);
+            CopyPieceFromTo(game->next_piece, game->piece);
+            GeneratePiece(game, game->next_piece);
 
-        // TODO: make random spawn locations
-        game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
+            // TODO: make random spawn locations
+            game->curr_piece_x = GRID_HORIZONTAL_SIZE/2;
 
-        // Spawn at the top (shape may not start at 0,0 of piece shape)
-        game->curr_piece_y = -1;
-        game->stop_piece = 0;
-        if(CheckPieceCollision(game, 0, 0)){
-            game->game_over = 1;
-            printf("Game Over\n");
+            // Spawn at the top (shape may not start at 0,0 of piece shape)
+            game->stop_moving_down = 0;
+            game->curr_piece_y = -1;
+            if(CheckPieceCollision(game, 0, 0)){
+                game->game_over = 1;
+                printf("Game Over\n");
 
-            // show the piece that caused the game over:
-            SetPieceInGrid(game, 1);
-            return;
+                // show the piece that caused the game over:
+                SetPieceInGrid(game, 1);
+                return;
+            }
+
+            gravity_count = 0;
         }
     }
 
@@ -218,14 +230,6 @@ void UpdateGame(Game* game) {
         }
     }
 
-
-    if(CheckPieceCollision(game, 0, 1)){
-        // Going to collide with something on the bottom
-        game->stop_piece = 1;
-        // go to next piece
-        return;
-    }
-
     if(IsKeyPressed(KEY_C)){
         // Either swap with the currently held piece, or save this piece
         SetPieceInGrid(game, 0);
@@ -251,21 +255,25 @@ void UpdateGame(Game* game) {
     }
 
     // Erase old location before applying gravity or moving
-    if(game->curr_piece_y < (GRID_VERTICAL_SIZE-1) && gravity_count >= gravity){
-        SetPieceInGrid(game, 0);
-        ++game->curr_piece_y;
-        gravity_count = 0;
-    } else if(IsKeyDown(KEY_DOWN) && game->curr_piece_y < (GRID_VERTICAL_SIZE-1)){
-        SetPieceInGrid(game, 0);
-        ++game->curr_piece_y;
+    if(!game->stop_moving_down){
+        if(game->curr_piece_y < (GRID_VERTICAL_SIZE-1) && gravity_count >= gravity){
+            SetPieceInGrid(game, 0);
+            ++game->curr_piece_y;
+            gravity_count = 0;
+        } else if(IsKeyDown(KEY_DOWN) && game->curr_piece_y < (GRID_VERTICAL_SIZE-1)){
+            SetPieceInGrid(game, 0);
+            ++game->curr_piece_y;
+        }
     }
 
     // Check for keyboard input, horizontal movement
     if(IsKeyPressed(KEY_LEFT) && !CheckPieceCollision(game, -1, 0)){
+        game->stop_moving_down = 0;
         SetPieceInGrid(game, 0);
         --game->curr_piece_x;
     }
     if(IsKeyPressed(KEY_RIGHT) && !CheckPieceCollision(game, 1, 0)){
+        game->stop_moving_down = 0;
         SetPieceInGrid(game, 0);
         ++game->curr_piece_x;
     }
