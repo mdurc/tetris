@@ -1,29 +1,16 @@
-### tetris
-- Simple tetris game with raylib in c
+## Tetris - Rewritten in Odin (from C)
 
-#### Features
+Written with Raylib, build with `just`.
 
-- Classic tetris gameplay with seven different piece types
-- Piece rotation
-- Line clearing
-- Levels and increasing difficulty
-- Piece holding
+**Controls:**
+- Left/right arrows or mouse for left/right piece movement.
+- Down arrow for soft drop, Spacebar for hard drop.
+- Up arrow to rotate right, Z to rotate left.
+- C to hold the current piece or swap it with the held piece.
 
-#### Controls
-- `Left Arrow`: Move the piece left
-- `Right Arrow`: Move the piece right
-- `Down Arrow`: Move the piece down faster
-- `Up Arrow`: Rotate the piece clockwise
-- `Spacebar`: Instantly drop the piece
-- `C`: Hold the current piece or swap it with the held piece
-
-#### Game Overview
-- 10 line clears per level.
-- Lock delay is removed after level 5 (50 lines).
-
-#### Custom (optional) arguments
-- `SQUARE_SIZE`: Scales all ui based on size. default is 30.
-
-#### Compile and run
-- `gcc main.c -lraylib && ./a.out`
-- Specifying custom `SQUARE_SIZE`: `gcc main.c -lraylib && ./a.out 15`
+**Game features:**
+- 1 piece can be held at a time.
+- 3 "next" pieces are visible at a time.
+- 10 lines per level.
+- Lock delay is equal to the amount of time it takes for a block to fall one row on the given level.
+- Scoring is standard new scoring.

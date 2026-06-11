@@ -158,7 +158,7 @@ void UpdateGame(Game* game) {
                         if(++game->level > 5){ // 50 ines
                             add_lock_delay = 0; // no more delay to place blocks
                         }
-                        gravity-=2;
+                        gravity-=5;
                     }
                     for(j=0;j<GRID_HORIZONTAL_SIZE;++j){
                         game->grid[i][j] = CLEARING;
