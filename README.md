@@ -1,6 +1,8 @@
 ## Tetris - Rewritten in Odin (from C)
 
-Written with Raylib, build with `just`.
+Written with Raylib, build with `just run`
+
+Rules taken from [tetris wiki](https://tetris.wiki/Tetris_Guideline).
 
 **Controls:**
 - Left/right arrows or mouse for left/right piece movement.

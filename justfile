@@ -1,3 +1,6 @@
+debug:
+  odin run . -debug
+
 run:
   odin run .
 
