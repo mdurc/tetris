@@ -1,7 +1,7 @@
 package main
 
 import "core:fmt"
-import "core:math"
+import "core:math/rand"
 import rl "vendor:raylib"
 
 SCREEN_WIDTH_PX, SCREEN_HEIGHT_PX :: 1200, 1000
@@ -22,7 +22,7 @@ dm, sx, sy :: GRID_SIZE, GAME_START_X, GAME_START_Y
 SPEED :: 1.0
 
 TetrominoType :: enum { I, J, L, O, S, T, Z }
-tetrominoColor : [TetrominoType]rl.Color = {
+tetroColor : [TetrominoType]rl.Color = {
   .I = rl.Color{0x66, 0xAB, 0xAA, 0xFF}, // cyan
   .J = rl.Color{0x5C, 0x74, 0xA1, 0xFF}, // blue
   .L = rl.Color{0xC7, 0x7D, 0x51, 0xFF}, // orange
@@ -38,31 +38,31 @@ Tetromino :: struct {
   pos : [2]i32,
   accumulator : f32
 }
-tetros : [7]Tetromino = {
-  { type = .I, minos = {{0,-1},{1,-1},{2,-1},{3,-1}} },
-  { type = .J, minos = {{0,-2},{0,-1},{1,-1},{2,-1}} },
-  { type = .L, minos = {{0,-1},{1,-1},{2,-1},{2,-2}} },
-  { type = .O, minos = {{1,-1},{1,-2},{2,-2},{2,-1}} },
-  { type = .S, minos = {{0,-1},{1,-1},{1,-2},{2,-2}} },
-  { type = .T, minos = {{0,-1},{1,-1},{1,-2},{2,-1}} },
-  { type = .Z, minos = {{0,-2},{1,-2},{1,-1},{2,-1}} },
+tetros : [TetrominoType]Tetromino = {
+  .I = { type = .I, minos = {{0,-1},{1,-1},{2,-1},{3,-1}} },
+  .J = { type = .J, minos = {{0,-2},{0,-1},{1,-1},{2,-1}} },
+  .L = { type = .L, minos = {{0,-1},{1,-1},{2,-1},{2,-2}} },
+  .O = { type = .O, minos = {{1,-1},{1,-2},{2,-2},{2,-1}} },
+  .S = { type = .S, minos = {{0,-1},{1,-1},{1,-2},{2,-2}} },
+  .T = { type = .T, minos = {{0,-1},{1,-1},{1,-2},{2,-1}} },
+  .Z = { type = .Z, minos = {{0,-2},{1,-2},{1,-1},{2,-1}} },
 }
 
 State :: struct {
   cur, hold : Tetromino,
+  has_held : bool,
+
   next : [3]Tetromino,
+
+  bag : bit_set[TetrominoType],
+  first_piece_drawn : bool,
+
+  grid : [GAME_WIDTH_UNITS][GAME_HEIGHT_UNITS]bool,
+
   lines, level, score : i32,
 }
 state : State
 mino_tex : rl.Texture2D
-
-/*
-   -- https://tetris.wiki/Random_Generator
-   Tetromino randomization is done by drawing each of the 7 pieces randomly from a bag.
-   No more than 12 tetrominoes can be produced between one I piece and the next.
-   Runs of S and Z tetrominoes are limited to a length of 4.
-   First piece of the first bag is always I, J, L, or T.
-*/
 
 render_game_wireframe :: proc() {
   // rl.DrawRectangleLines(x, y, width, height, rl.DARKGRAY) // too thin
@@ -100,7 +100,7 @@ render_tetromino :: proc(t: ^Tetromino) {
     rl.DrawRectangleLinesEx({f32(sx+t.pos.x*dm), f32(sy+(t.pos.y-2)*dm), sz_x, sz_y}, 3, rl.DARKPURPLE)
   }
   for &p in t.minos {
-    render_mino(t.pos.x+p.x, t.pos.y+p.y, tetrominoColor[t.type])
+    render_mino(t.pos.x+p.x, t.pos.y+p.y, tetroColor[t.type])
   }
 }
 
@@ -122,18 +122,54 @@ rotate_clockwise :: proc(t: ^Tetromino) {
   }
 }
 
+// random generator
+spawn_tetromino :: proc() -> Tetromino {
+  if card(state.bag) == 0 {
+    state.bag = { .I, .J, .L, .O, .S, .T, .Z }
+  }
+
+  t: TetrominoType
+  ok: bool
+  if !state.first_piece_drawn {
+    t, ok = rand.choice_bit_set(bit_set[TetrominoType]{ .I, .J, .L, .T })
+    state.first_piece_drawn = true
+  } else {
+    t, ok = rand.choice_bit_set(state.bag)
+  }
+
+  assert(ok)
+  state.bag -= { t }
+  fmt.printfln("Bag: %v", state.bag)
+  tetros[t].pos.x = rand.int32_range(0, 10)
+  return tetros[t]
+}
+
+init_game :: proc() {
+  mino_tex = rl.LoadTexture("res/mino.png")
+
+  state.bag = {}
+  state.first_piece_drawn = false
+  state.cur = spawn_tetromino()
+  // for &t in state.next {
+  //   t = spawn_tetromino()
+  // }
+}
+
 main :: proc() {
   // todo: screen resizing while keeping all elements looking good.
   rl.InitWindow(SCREEN_WIDTH_PX, SCREEN_HEIGHT_PX, "tetris")
   defer rl.CloseWindow()
 
-  state.cur = tetros[4]
-  mino_tex = rl.LoadTexture("res/mino.png")
+  init_game()
 
   for !rl.WindowShouldClose() {
     dt := rl.GetFrameTime()
 
     tick(&state.cur, dt)
+
+    if rl.IsKeyPressed(.SPACE) {
+      state.cur = spawn_tetromino()
+    }
 
     rl.BeginDrawing()
     rl.ClearBackground(BG_COLOR)
