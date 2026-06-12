@@ -34,22 +34,18 @@ tetrominoColor : [TetrominoType]rl.Color = {
 
 Tetromino :: struct {
   type : TetrominoType,
-  pos : [4][2]i32,
+  minos : [4][2]i32,
+  pos : [2]i32,
   accumulator : f32
 }
 tetros : [7]Tetromino = {
-  { type = .I, pos = {{0,-1},{1,-1},{2,-1},{3,-1}} },
-  // { type = .I, pos = {{2,-2},{2,-1},{2,0},{2,1}} },
-  // x = 1-y
-  // y = x-2
-
-
-  { type = .J, pos = {{0,-2},{0,-1},{1,-1},{2,-1}} },
-  { type = .L, pos = {{0,-1},{1,-1},{2,-1},{2,-2}} },
-  { type = .O, pos = {{1,-1},{1,-2},{2,-2},{2,-1}} },
-  { type = .S, pos = {{0,-1},{1,-1},{1,-2},{2,-2}} },
-  { type = .T, pos = {{0,-1},{1,-1},{1,-2},{2,-1}} },
-  { type = .Z, pos = {{0,-2},{1,-2},{1,-1},{2,-1}} },
+  { type = .I, minos = {{0,-1},{1,-1},{2,-1},{3,-1}} },
+  { type = .J, minos = {{0,-2},{0,-1},{1,-1},{2,-1}} },
+  { type = .L, minos = {{0,-1},{1,-1},{2,-1},{2,-2}} },
+  { type = .O, minos = {{1,-1},{1,-2},{2,-2},{2,-1}} },
+  { type = .S, minos = {{0,-1},{1,-1},{1,-2},{2,-2}} },
+  { type = .T, minos = {{0,-1},{1,-1},{1,-2},{2,-1}} },
+  { type = .Z, minos = {{0,-2},{1,-2},{1,-1},{2,-1}} },
 }
 
 State :: struct {
@@ -97,14 +93,14 @@ render_mino :: proc(x, y: i32, c: rl.Color) {
   rl.DrawTexture(mino_tex, sx+x*dm, sy+y*dm, c)
 }
 
-render_tetromino :: proc(x, y: i32, t: ^Tetromino) {
+render_tetromino :: proc(t: ^Tetromino) {
   when ODIN_DEBUG {
     sz_x : f32 = t.type == .I || t.type == .O ? 4*dm: 3*dm
     sz_y : f32 = t.type == .O ? 3*dm : sz_x
-    rl.DrawRectangleLinesEx({f32(sx+x*dm), f32(sy+(y-2)*dm), sz_x, sz_y}, 3, rl.DARKPURPLE)
+    rl.DrawRectangleLinesEx({f32(sx+t.pos.x*dm), f32(sy+(t.pos.y-2)*dm), sz_x, sz_y}, 3, rl.DARKPURPLE)
   }
-  for &p in t.pos {
-    render_mino(x+p.x, y+p.y, tetrominoColor[t.type])
+  for &p in t.minos {
+    render_mino(t.pos.x+p.x, t.pos.y+p.y, tetrominoColor[t.type])
   }
 }
 
@@ -113,16 +109,15 @@ tick :: proc(t: ^Tetromino, dt: f32) {
   // fmt.println(t.accumulator)
   dy := i32(t.accumulator)
   t.accumulator -= f32(dy)
-  if dy == 0 do return
-  rotate_clockwise(t)
-  // for &p in t.pos {
-  //   p.y += dy
-  // }
+  if (dy > 0) {
+    t.pos.y += dy
+    rotate_clockwise(t)
+  }
 }
 
 rotate_clockwise :: proc(t: ^Tetromino) {
   if t.type == .O do return
-  for &p in t.pos {
+  for &p in t.minos {
     p.x, p.y = (t.type == .I ? 1: 0)-p.y, p.x-2
   }
 }
@@ -132,26 +127,18 @@ main :: proc() {
   rl.InitWindow(SCREEN_WIDTH_PX, SCREEN_HEIGHT_PX, "tetris")
   defer rl.CloseWindow()
 
-  state.cur = tetros[1]
+  state.cur = tetros[4]
   mino_tex = rl.LoadTexture("res/mino.png")
 
   for !rl.WindowShouldClose() {
     dt := rl.GetFrameTime()
 
-    for &t in tetros {
-      tick(&t, dt)
-    }
+    tick(&state.cur, dt)
 
     rl.BeginDrawing()
     rl.ClearBackground(BG_COLOR)
 
-    for &c, i in tetrominoColor {
-      render_mino(-8, i32(i), c)
-    }
-    render_tetromino(0, 15, &state.cur)
-    for &t, i in tetros {
-      render_tetromino((i<4?0:8), i32((i<4?i*4:(i-4)*4)), &t)
-    }
+    render_tetromino(&state.cur)
     render_game_wireframe()
 
     rl.EndDrawing()
