@@ -24,8 +24,8 @@ dm, sx, sy :: GRID_SIZE, GAME_START_X, GAME_START_Y
 FALL_SPEED :: 1.0 // grid cell/second
 SOFT_SPEED :: FALL_SPEED * 15
 
-DAS_DELAY_MS :: 180.0 // initial delay before repeating (delayed-auto-shift)
-ARR_DELAY_MS :: 40.0  // delay between repeated movements (auto-repeat-rate)
+DAS_DELAY_MS :: 180.0  // initial delay before repeating (delayed-auto-shift)
+ARR_DELAY_MS :: 40.0   // delay between repeated movements (auto-repeat-rate)
 
 TetrominoType :: enum { I, J, L, O, S, T, Z }
 tetroColor : [TetrominoType]rl.Color = {
@@ -90,7 +90,7 @@ State :: struct {
   bag : bit_set[TetrominoType],
   first_piece_drawn : bool,
 
-  grid : [GAME_WIDTH_UNITS][GAME_HEIGHT_UNITS]struct { filled: bool, type: TetrominoType } ,
+  grid : [GAME_HEIGHT_UNITS][GAME_WIDTH_UNITS]struct { filled: bool, type: TetrominoType } ,
 
   lines, level, score : i32,
 
@@ -143,8 +143,8 @@ render_grid :: proc() {
   x, y : i32
   for x = 0; x < GAME_WIDTH_UNITS; x += 1 {
     for y = 0; y < GAME_HEIGHT_UNITS; y += 1 {
-      if state.grid[x][y].filled {
-        render_mino(x, y, state.grid[x][y].type)
+      if state.grid[y][x].filled {
+        render_mino(x, y, state.grid[y][x].type)
       }
     }
   }
@@ -153,7 +153,7 @@ render_grid :: proc() {
 is_valid_placement :: proc(grid_x, grid_y: i32, minos: [][2]i32) -> bool {
   for p in minos {
     x, y := grid_x+p.x, grid_y+p.y
-    if x < 0 || x >= GAME_WIDTH_UNITS || y >= GAME_HEIGHT_UNITS || (y >= 0 && state.grid[x][y].filled) {
+    if x < 0 || x >= GAME_WIDTH_UNITS || y >= GAME_HEIGHT_UNITS || (y >= 0 && state.grid[y][x].filled) {
       return false
     }
   }
@@ -239,9 +239,31 @@ lock_tetro :: proc(t: ^Tetromino) {
   for &p in t.minos {
     x, y := t.pos.x+p.x, t.pos.y+p.y
     if x >= 0 && x < GAME_WIDTH_UNITS && y >= 0 && y < GAME_HEIGHT_UNITS {
-      state.grid[x][y] = { true, t.type }
+      state.grid[y][x] = { true, t.type }
     }
   }
+
+  x, y, lines_cleared : i32
+  last_cleared_y : i32 = GAME_HEIGHT_UNITS - 1
+  for y = GAME_HEIGHT_UNITS-1; y >= 0; y -= 1 {
+    is_filled := true
+    for x = 0; x < GAME_WIDTH_UNITS; x += 1 {
+      if !state.grid[y][x].filled {
+        is_filled = false
+        break
+      }
+    }
+    if is_filled {
+      lines_cleared += 1
+    } else {
+      state.grid[last_cleared_y] = state.grid[y]
+      last_cleared_y -= 1
+    }
+  }
+  for y = last_cleared_y; y >= 0; y -= 1 {
+    state.grid[y] = {}
+  }
+  state.lines += lines_cleared
 }
 
 init_game :: proc() {
