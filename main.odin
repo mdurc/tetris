@@ -38,11 +38,36 @@ tetroColor : [TetrominoType]rl.Color = {
   .Z = rl.Color{0xBE, 0x61, 0x5B, 0xFF}, // red
 }
 
+// https://tetris.wiki/Super_Rotation_System (we invert y's because +y is down for us)
+// SRS wall kick tables: [rot_state][0:CCW, 1:CW][kick_test]
+KICKS_JLSTZ := [4][2][5][2]i32{
+  {{{ 0, 0}, {+1, 0}, {+1,-1}, { 0,+2}, {+1,+2}},   // 0 -> L
+   {{ 0, 0}, {-1, 0}, {-1,-1}, { 0,+2}, {-1,+2}},}, // 0 -> R
+  {{{ 0, 0}, {+1, 0}, {+1,+1}, { 0,-2}, {+1,-2}},   // 1 -> L
+   {{ 0, 0}, {+1, 0}, {+1,+1}, { 0,-2}, {+1,-2}},}, // 1 -> R
+  {{{ 0, 0}, {-1, 0}, {-1,-1}, { 0,+2}, {-1,+2}},   // 2 -> L
+   {{ 0, 0}, {+1, 0}, {+1,-1}, { 0,+2}, {+1,+2}},}, // 2 -> R
+  {{{ 0, 0}, {-1, 0}, {-1,+1}, { 0,-2}, {-1,-2}},   // 3 -> L
+   {{ 0, 0}, {-1, 0}, {-1,+1}, { 0,-2}, {-1,-2}},}, // 3 -> R
+}
+KICKS_I := [4][2][5][2]i32{
+  {{{ 0, 0}, {-1, 0}, {+2, 0}, {-1,-2}, {+2,+1}},   // 0 -> L
+   {{ 0, 0}, {-2, 0}, {+1, 0}, {-2,+1}, {+1,-2}},}, // 0 -> R
+  {{{ 0, 0}, {+2, 0}, {-1, 0}, {+2,-1}, {-1,+2}},   // 1 -> L
+   {{ 0, 0}, {-1, 0}, {+2, 0}, {-1,-2}, {+2,+1}},}, // 1 -> R
+  {{{ 0, 0}, {+1, 0}, {-2, 0}, {+1,+2}, {-2,-1}},   // 2 -> L
+   {{ 0, 0}, {+2, 0}, {-1, 0}, {+2,-1}, {-1,+2}},}, // 2 -> R
+  {{{ 0, 0}, {-2, 0}, {+1, 0}, {-2,+1}, {+1,-2}},   // 3 -> L
+   {{ 0, 0}, {+1, 0}, {-2, 0}, {+1,+2}, {-2,-1}},}, // 3 -> R
+}
+
+
 Tetromino :: struct {
   type : TetrominoType,
   box_sz : i32,
   minos : [4][2]i32, // offsets from pos
   pos : [2]i32,
+  rot_state : i32, // [0..3]
   accum_y : f32,
 }
 tetros : [TetrominoType]Tetromino = {
@@ -107,7 +132,6 @@ render_mino :: proc(grid_x, grid_y: i32, type: TetrominoType) {
 
 render_tetro :: proc(t: ^Tetromino) {
   for &p in t.minos {
-    // y+1 to account for the starting mino y position at -1
     render_mino(t.pos.x+p.x, t.pos.y+p.y, t.type)
   }
   when DBG {
@@ -145,7 +169,7 @@ tick :: proc(t: ^Tetromino, dt: f32) {
     // move down one space at a time
     for i : i32 = 0; i < dy; i += 1 {
       if !try_move(t, 0, 1) {
-        solidify_tetro(t)
+        lock_tetro(t)
         state.cur = spawn_tetro()
         break
       }
@@ -163,8 +187,17 @@ try_rotate :: proc(t: ^Tetromino, clockwise: bool) {
       p.x, p.y = p.y, (t.type == .I ? 3: 2)-p.x
     }
   }
-  if is_valid_placement(t.pos.x, t.pos.y, next_minos[:]) {
-    t.minos = next_minos
+
+  next_state := (t.rot_state + (clockwise ? 1 : 3)) % 4
+  dir_idx := clockwise ? 1 : 0
+  kicks := t.type == .I ? KICKS_I[t.rot_state][dir_idx][:] : KICKS_JLSTZ[t.rot_state][dir_idx][:]
+  for k in kicks {
+    if is_valid_placement(t.pos.x+k.x, t.pos.y+k.y, next_minos[:]) {
+      t.minos = next_minos
+      t.pos += k
+      t.rot_state = next_state
+      return
+    }
   }
 }
 
@@ -183,24 +216,26 @@ spawn_tetro :: proc() -> Tetromino {
     state.bag = { .I, .J, .L, .O, .S, .T, .Z }
   }
 
-  t: TetrominoType
+  t_type: TetrominoType
   ok: bool
   if !state.first_piece_drawn {
-    t, ok = rand.choice_bit_set(bit_set[TetrominoType]{ .I, .J, .L, .T })
+    t_type, ok = rand.choice_bit_set(bit_set[TetrominoType]{ .I, .J, .L, .T })
     state.first_piece_drawn = true
   } else {
-    t, ok = rand.choice_bit_set(state.bag)
+    t_type, ok = rand.choice_bit_set(state.bag)
   }
 
   assert(ok)
-  state.bag -= { t }
+  state.bag -= { t_type }
   when DBG do fmt.printfln("Bag: %v", state.bag)
-  tetros[t].pos.x = rand.int32_range(0, GAME_WIDTH_UNITS-tetros[t].box_sz+1)
-  tetros[t].pos.y = -2
-  return tetros[t]
+  t := tetros[t_type]
+  // t.pos.x = rand.int32_range(0, GAME_WIDTH_UNITS-tetros[t_type].box_sz+1)
+  t.pos.x = (t_type == .O) ? 4 : 3 // start in the center
+  t.pos.y = -2
+  return t
 }
 
-solidify_tetro :: proc(t: ^Tetromino) {
+lock_tetro :: proc(t: ^Tetromino) {
   for &p in t.minos {
     x, y := t.pos.x+p.x, t.pos.y+p.y
     if x >= 0 && x < GAME_WIDTH_UNITS && y >= 0 && y < GAME_HEIGHT_UNITS {
@@ -237,10 +272,10 @@ main :: proc() {
       for is_valid_placement(state.cur.pos.x, state.cur.pos.y+1, state.cur.minos[:]) {
         state.cur.pos.y += 1
       }
-      solidify_tetro(&state.cur)
+      lock_tetro(&state.cur)
       state.cur = spawn_tetro()
     }
-    if rl.IsKeyPressed(.UP) {
+    if rl.IsKeyPressed(.UP) || rl.IsKeyPressed(.X) {
       try_rotate(&state.cur, true)
     } else if rl.IsKeyPressed(.Z) {
       try_rotate(&state.cur, false)
