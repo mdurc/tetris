@@ -19,7 +19,9 @@ GAME_START_Y :: (SCREEN_HEIGHT_PX-GAME_HEIGHT_PX) >> 1
 width, height :: GAME_WIDTH_PX, GAME_HEIGHT_PX
 dm, sx, sy :: GRID_SIZE, GAME_START_X, GAME_START_Y
 
-SPEED :: 1.0
+FALL_SPEED :: 1.0
+SOFT_SPEED :: 10.0
+SIDE_SPEED :: 15.0
 
 TetrominoType :: enum { I, J, L, O, S, T, Z }
 tetroColor : [TetrominoType]rl.Color = {
@@ -34,9 +36,9 @@ tetroColor : [TetrominoType]rl.Color = {
 
 Tetromino :: struct {
   type : TetrominoType,
-  minos : [4][2]i32,
+  minos : [4][2]i32, // offsets from pos
   pos : [2]i32,
-  accumulator : f32
+  accum_y, accum_x : f32
 }
 tetros : [TetrominoType]Tetromino = {
   .I = { type = .I, minos = {{0,-1},{1,-1},{2,-1},{3,-1}} },
@@ -94,24 +96,30 @@ render_mino :: proc(x, y: i32, c: rl.Color) {
 }
 
 render_tetromino :: proc(t: ^Tetromino) {
-  when ODIN_DEBUG {
-    sz_x : f32 = t.type == .I || t.type == .O ? 4*dm: 3*dm
-    sz_y : f32 = t.type == .O ? 3*dm : sz_x
-    rl.DrawRectangleLinesEx({f32(sx+t.pos.x*dm), f32(sy+(t.pos.y-2)*dm), sz_x, sz_y}, 3, rl.DARKPURPLE)
-  }
   for &p in t.minos {
-    render_mino(t.pos.x+p.x, t.pos.y+p.y, tetroColor[t.type])
+    // y+1 to account for the starting mino y position at -1
+    render_mino(t.pos.x+p.x, (t.pos.y+1)+p.y, tetroColor[t.type])
+  }
+  when ODIN_DEBUG {
+    sz : f32 = t.type == .I ? 4*dm: t.type == .O ? 2*dm: 3*dm
+    rl.DrawRectangleLinesEx({f32(sx+t.pos.x*dm), f32(sy+(t.pos.y-1)*dm), sz, sz}, 3, rl.DARKPURPLE)
   }
 }
 
 tick :: proc(t: ^Tetromino, dt: f32) {
-  t.accumulator += SPEED*dt
-  // fmt.println(t.accumulator)
-  dy := i32(t.accumulator)
-  t.accumulator -= f32(dy)
-  if (dy > 0) {
+  t.accum_y += FALL_SPEED*dt
+  dy, dx := i32(t.accum_y), i32(t.accum_x)
+  t.accum_y -= f32(dy)
+  if dy > 0 {
     t.pos.y += dy
-    rotate_clockwise(t)
+  }
+  if dx != 0 {
+    t.pos.x += dx
+  }
+  if (t.accum_x < 0) == (dx < 0) {
+    t.accum_x -= f32(dx)
+  } else {
+    t.accum_x += f32(dx)
   }
 }
 
@@ -139,7 +147,7 @@ spawn_tetromino :: proc() -> Tetromino {
 
   assert(ok)
   state.bag -= { t }
-  fmt.printfln("Bag: %v", state.bag)
+  when ODIN_DEBUG do fmt.printfln("Bag: %v", state.bag)
   tetros[t].pos.x = rand.int32_range(0, 10)
   return tetros[t]
 }
@@ -162,17 +170,52 @@ main :: proc() {
 
   init_game()
 
+  dbg_tetros := tetros
+
   for !rl.WindowShouldClose() {
     dt := rl.GetFrameTime()
 
     tick(&state.cur, dt)
 
+    when ODIN_DEBUG {
+      // for &t in dbg_tetros {
+      //   tick(&t, dt)
+      // }
+    }
+
     if rl.IsKeyPressed(.SPACE) {
       state.cur = spawn_tetromino()
+    }
+    if rl.IsKeyPressed(.UP) {
+      rotate_clockwise(&state.cur)
+    } else if rl.IsKeyPressed(.Z) {
+      rotate_clockwise(&state.cur)
+      rotate_clockwise(&state.cur)
+      rotate_clockwise(&state.cur)
+    }
+    if rl.IsKeyDown(.DOWN) {
+      state.cur.accum_y += SOFT_SPEED*dt
+    }
+    if rl.IsKeyDown(.LEFT) {
+      state.cur.accum_x -= SIDE_SPEED*dt
+    }
+    if rl.IsKeyDown(.RIGHT) {
+      state.cur.accum_x += SIDE_SPEED*dt
     }
 
     rl.BeginDrawing()
     rl.ClearBackground(BG_COLOR)
+
+    when ODIN_DEBUG {
+      for &c, i in tetroColor {
+        render_mino(-8, i32(i), c)
+      }
+      for &t, i in dbg_tetros {
+        idx := i32(i)
+        t.pos = {(idx<4?10:15), i32((idx<4?idx*4:(idx-4)*4))}
+        render_tetromino(&t)
+      }
+    }
 
     render_tetromino(&state.cur)
     render_game_wireframe()
