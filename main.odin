@@ -36,18 +36,19 @@ tetroColor : [TetrominoType]rl.Color = {
 
 Tetromino :: struct {
   type : TetrominoType,
+  box_sz : i32,
   minos : [4][2]i32, // offsets from pos
   pos : [2]i32,
   accum_y, accum_x : f32
 }
 tetros : [TetrominoType]Tetromino = {
-  .I = { type = .I, minos = {{0,-1},{1,-1},{2,-1},{3,-1}} },
-  .J = { type = .J, minos = {{0,-2},{0,-1},{1,-1},{2,-1}} },
-  .L = { type = .L, minos = {{0,-1},{1,-1},{2,-1},{2,-2}} },
-  .O = { type = .O, minos = {{1,-1},{1,-2},{2,-2},{2,-1}} },
-  .S = { type = .S, minos = {{0,-1},{1,-1},{1,-2},{2,-2}} },
-  .T = { type = .T, minos = {{0,-1},{1,-1},{1,-2},{2,-1}} },
-  .Z = { type = .Z, minos = {{0,-2},{1,-2},{1,-1},{2,-1}} },
+  .I = { type = .I, box_sz = 4, minos = {{0,-1},{1,-1},{2,-1},{3,-1}} },
+  .J = { type = .J, box_sz = 3, minos = {{0,-2},{0,-1},{1,-1},{2,-1}} },
+  .L = { type = .L, box_sz = 3, minos = {{0,-1},{1,-1},{2,-1},{2,-2}} },
+  .O = { type = .O, box_sz = 2, minos = {{0,-1},{0,-2},{1,-2},{1,-1}} },
+  .S = { type = .S, box_sz = 3, minos = {{0,-1},{1,-1},{1,-2},{2,-2}} },
+  .T = { type = .T, box_sz = 3, minos = {{0,-1},{1,-1},{1,-2},{2,-1}} },
+  .Z = { type = .Z, box_sz = 3, minos = {{0,-2},{1,-2},{1,-1},{2,-1}} },
 }
 
 State :: struct {
@@ -59,7 +60,7 @@ State :: struct {
   bag : bit_set[TetrominoType],
   first_piece_drawn : bool,
 
-  grid : [GAME_WIDTH_UNITS][GAME_HEIGHT_UNITS]bool,
+  grid : [GAME_WIDTH_UNITS][GAME_HEIGHT_UNITS]struct { filled: bool, type: TetrominoType } ,
 
   lines, level, score : i32,
 }
@@ -91,18 +92,28 @@ render_game_wireframe :: proc() {
   rl.DrawRectangleLines(sx-1.5*dm, sy+height-dm, -6*dm, -7*dm, rl.DARKGRAY)
 }
 
-render_mino :: proc(x, y: i32, c: rl.Color) {
-  rl.DrawTexture(mino_tex, sx+x*dm, sy+y*dm, c)
+render_mino :: proc(x, y: i32, type: TetrominoType) {
+  rl.DrawTexture(mino_tex, sx+x*dm, sy+y*dm, tetroColor[type])
 }
 
 render_tetromino :: proc(t: ^Tetromino) {
   for &p in t.minos {
     // y+1 to account for the starting mino y position at -1
-    render_mino(t.pos.x+p.x, (t.pos.y+1)+p.y, tetroColor[t.type])
+    render_mino(t.pos.x+p.x, (t.pos.y+1)+p.y, t.type)
   }
   when ODIN_DEBUG {
-    sz : f32 = t.type == .I ? 4*dm: t.type == .O ? 2*dm: 3*dm
-    rl.DrawRectangleLinesEx({f32(sx+t.pos.x*dm), f32(sy+(t.pos.y-1)*dm), sz, sz}, 3, rl.DARKPURPLE)
+    rl.DrawRectangleLinesEx({f32(sx+t.pos.x*dm), f32(sy+(t.pos.y-1)*dm), f32(t.box_sz*dm), f32(t.box_sz*dm)}, 3, rl.DARKPURPLE)
+  }
+}
+
+render_grid :: proc() {
+  x, y : i32
+  for x = 0; x < GAME_WIDTH_UNITS; x += 1 {
+    for y = 0; y < GAME_HEIGHT_UNITS; y += 1 {
+      if state.grid[x][y].filled {
+        render_mino(x, y, state.grid[x][y].type)
+      }
+    }
   }
 }
 
@@ -148,8 +159,17 @@ spawn_tetromino :: proc() -> Tetromino {
   assert(ok)
   state.bag -= { t }
   when ODIN_DEBUG do fmt.printfln("Bag: %v", state.bag)
-  tetros[t].pos.x = rand.int32_range(0, 10)
+  tetros[t].pos.x = rand.int32_range(0, GAME_WIDTH_UNITS-tetros[t].box_sz+1)
   return tetros[t]
+}
+
+solidify_tetro :: proc(t: ^Tetromino) {
+  for &p in t.minos {
+    x, y := t.pos.x+p.x, (t.pos.y+1)+p.y
+    if x >= 0 && x < GAME_WIDTH_UNITS && y >= 0 && y < GAME_HEIGHT_UNITS {
+      state.grid[x][y] = { true, t.type }
+    }
+  }
 }
 
 init_game :: proc() {
@@ -184,6 +204,7 @@ main :: proc() {
     }
 
     if rl.IsKeyPressed(.SPACE) {
+      solidify_tetro(&state.cur)
       state.cur = spawn_tetromino()
     }
     if rl.IsKeyPressed(.UP) {
@@ -208,7 +229,7 @@ main :: proc() {
 
     when ODIN_DEBUG {
       for &c, i in tetroColor {
-        render_mino(-8, i32(i), c)
+        render_mino(-8, i32(i), i)
       }
       for &t, i in dbg_tetros {
         idx := i32(i)
@@ -217,6 +238,7 @@ main :: proc() {
       }
     }
 
+    render_grid()
     render_tetromino(&state.cur)
     render_game_wireframe()
 
