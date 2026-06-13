@@ -26,6 +26,11 @@ SOFT_SPEED :: FALL_SPEED * 15
 
 DAS_DELAY_MS :: 180.0  // initial delay before repeating (delayed-auto-shift)
 ARR_DELAY_MS :: 40.0   // delay between repeated movements (auto-repeat-rate)
+LOCK_DELAY_MS :: 500.0 // time a tetro waits on the ground before locking
+
+LockDelayMode :: enum { GRAVITY, TIME_BASED, MOVE_RESET_CAPPED, MOVE_RESET_INFINITE }
+LOCK_MODE :: LockDelayMode.MOVE_RESET_CAPPED
+MAX_LOCK_RESETS :: 15
 
 TetrominoType :: enum { I, J, L, O, S, T, Z }
 tetroColor : [TetrominoType]rl.Color = {
@@ -61,14 +66,14 @@ KICKS_I := [4][2][5][2]i32{
    {{ 0, 0}, {+1, 0}, {-2, 0}, {+1,+2}, {-2,-1}},}, // 3 -> R
 }
 
-
 Tetromino :: struct {
   type : TetrominoType,
   box_sz : i32,
   minos : [4][2]i32, // offsets from pos
   pos : [2]i32,
   rot_state : i32, // [0..3]
-  accum_y : f32,
+  accum_y: f32,
+  lock_timer_ms : f32, lock_resets : i32,
 }
 tetros : [TetrominoType]Tetromino = {
   .I = { type = .I, box_sz = 4, minos = {{0,1},{1,1},{2,1},{3,1}} },
@@ -160,25 +165,55 @@ is_valid_placement :: proc(grid_x, grid_y: i32, minos: [][2]i32) -> bool {
   return true
 }
 
-tick :: proc(t: ^Tetromino, dt: f32) {
-  t.accum_y += FALL_SPEED * dt
+is_grounded :: proc(t: ^Tetromino) -> bool { return !is_valid_placement(t.pos.x, t.pos.y+1, t.minos[:]) }
 
+trigger_lock_reset :: proc() {
+  if LOCK_MODE == .GRAVITY || LOCK_MODE == .TIME_BASED {
+    return
+  }
+  if is_grounded(&state.cur) {
+    if LOCK_MODE == .MOVE_RESET_INFINITE {
+      state.cur.lock_timer_ms = 0.0
+    } else if LOCK_MODE == .MOVE_RESET_CAPPED {
+      fmt.printfln("reset: %v/%v", state.cur.lock_resets, MAX_LOCK_RESETS)
+      if state.cur.lock_resets < MAX_LOCK_RESETS {
+        state.cur.lock_timer_ms = 0.0
+        state.cur.lock_resets += 1
+      }
+    }
+  }
+}
+
+tick :: proc(t: ^Tetromino, dt_s, dt_ms: f32) {
+  if is_grounded(t) {
+    t.accum_y = 0.0 // turn off gravity, rely on lock delay
+    state.cur.lock_timer_ms += dt_ms
+    // fmt.println(state.cur.lock_timer_ms, "/", LOCK_DELAY_MS)
+    if state.cur.lock_timer_ms >= LOCK_DELAY_MS {
+      lock_tetro(t)
+      state.cur = spawn_tetro()
+    }
+    return
+  }
+
+  state.cur.lock_timer_ms = 0.0
+  t.accum_y += FALL_SPEED * dt_s
   dy := i32(t.accum_y)
   if dy > 0 {
     t.accum_y -= f32(dy)
     // move down one space at a time
     for i : i32 = 0; i < dy; i += 1 {
       if !try_move(t, 0, 1) {
-        lock_tetro(t)
-        state.cur = spawn_tetro()
+        // next frame will handle lock delay
         break
       }
     }
   }
 }
 
-try_rotate :: proc(t: ^Tetromino, clockwise: bool) {
-  if t.type == .O do return
+try_rotate :: proc(t: ^Tetromino, clockwise: bool) -> bool {
+  if t.type == .O do return false
+
   next_minos := t.minos
   for &p in next_minos {
     if clockwise {
@@ -196,15 +231,22 @@ try_rotate :: proc(t: ^Tetromino, clockwise: bool) {
       t.minos = next_minos
       t.pos += k
       t.rot_state = next_state
-      return
+      trigger_lock_reset()
+      return true
     }
   }
+  return false
 }
 
 try_move :: proc(t: ^Tetromino, dx, dy: i32) -> bool {
   if is_valid_placement(t.pos.x+dx, t.pos.y+dy, t.minos[:]) {
     t.pos.x += dx
     t.pos.y += dy
+
+    if dx != 0 {
+      // any horizontal movement will trigger reset
+      trigger_lock_reset()
+    }
     return true
   }
   return false
@@ -287,8 +329,8 @@ main :: proc() {
 
   dbg_tetros := tetros
   for !rl.WindowShouldClose() {
-    dt := rl.GetFrameTime()
-    dt_ms := dt * 1000.0
+    dt_s := rl.GetFrameTime()
+    dt_ms := dt_s * 1000.0
 
     if rl.IsKeyPressed(.SPACE) {
       for is_valid_placement(state.cur.pos.x, state.cur.pos.y+1, state.cur.minos[:]) {
@@ -297,13 +339,15 @@ main :: proc() {
       lock_tetro(&state.cur)
       state.cur = spawn_tetro()
     }
+
     if rl.IsKeyPressed(.UP) || rl.IsKeyPressed(.X) {
       try_rotate(&state.cur, true)
     } else if rl.IsKeyPressed(.Z) {
       try_rotate(&state.cur, false)
     }
+
     if rl.IsKeyDown(.DOWN) {
-      state.cur.accum_y += SOFT_SPEED*dt
+      state.cur.accum_y += SOFT_SPEED*dt_s
     }
 
     first_left, first_right := rl.IsKeyPressed(.LEFT), rl.IsKeyPressed(.RIGHT)
@@ -340,7 +384,7 @@ main :: proc() {
       }
     }
 
-    tick(&state.cur, dt)
+    tick(&state.cur, dt_s, dt_ms)
 
     rl.BeginDrawing()
     rl.ClearBackground(BG_COLOR)
