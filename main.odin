@@ -360,7 +360,6 @@ trigger_lock_reset :: proc() {
     if state.config.lock_mode == .RESET_INFINITE {
       state.cur.lock_timer_ms = 0.0
     } else if state.config.lock_mode == .RESET_CAPPED {
-      fmt.printfln("reset: %v/%v", state.cur.lock_resets, MAX_LOCK_RESETS)
       if state.cur.lock_resets < MAX_LOCK_RESETS {
         state.cur.lock_timer_ms = 0.0
         state.cur.lock_resets += 1
