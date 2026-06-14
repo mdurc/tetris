@@ -33,32 +33,19 @@ DAS_DELAY_MS :: 180.0  // initial delay before repeating (delayed-auto-shift)
 ARR_DELAY_MS :: 40.0   // delay between repeated movements (auto-repeat-rate)
 LOCK_DELAY_MS :: 500.0 // time a tetro waits on the ground before locking
 
-LockDelayMode :: enum { GRAVITY, TIME_BASED, MOVE_RESET_CAPPED, MOVE_RESET_INFINITE }
 LOCK_MODE :: LockDelayMode.MOVE_RESET_CAPPED
 MAX_LOCK_RESETS :: 15
 
-// https://tetris.wiki/Super_Rotation_System (we invert y's because +y is down for us)
-// SRS wall kick tables: [rot_state][0:CCW, 1:CW][kick_test]
-KICKS_JLSTZ := [4][2][5][2]i32{
-  {{{ 0, 0}, {+1, 0}, {+1,-1}, { 0,+2}, {+1,+2}},   // 0 -> L
-   {{ 0, 0}, {-1, 0}, {-1,-1}, { 0,+2}, {-1,+2}},}, // 0 -> R
-  {{{ 0, 0}, {+1, 0}, {+1,+1}, { 0,-2}, {+1,-2}},   // 1 -> L
-   {{ 0, 0}, {+1, 0}, {+1,+1}, { 0,-2}, {+1,-2}},}, // 1 -> R
-  {{{ 0, 0}, {-1, 0}, {-1,-1}, { 0,+2}, {-1,+2}},   // 2 -> L
-   {{ 0, 0}, {+1, 0}, {+1,-1}, { 0,+2}, {+1,+2}},}, // 2 -> R
-  {{{ 0, 0}, {-1, 0}, {-1,+1}, { 0,-2}, {-1,-2}},   // 3 -> L
-   {{ 0, 0}, {-1, 0}, {-1,+1}, { 0,-2}, {-1,-2}},}, // 3 -> R
-}
-KICKS_I := [4][2][5][2]i32{
-  {{{ 0, 0}, {-1, 0}, {+2, 0}, {-1,-2}, {+2,+1}},   // 0 -> L
-   {{ 0, 0}, {-2, 0}, {+1, 0}, {-2,+1}, {+1,-2}},}, // 0 -> R
-  {{{ 0, 0}, {+2, 0}, {-1, 0}, {+2,-1}, {-1,+2}},   // 1 -> L
-   {{ 0, 0}, {-1, 0}, {+2, 0}, {-1,-2}, {+2,+1}},}, // 1 -> R
-  {{{ 0, 0}, {+1, 0}, {-2, 0}, {+1,+2}, {-2,-1}},   // 2 -> L
-   {{ 0, 0}, {+2, 0}, {-1, 0}, {+2,-1}, {-1,+2}},}, // 2 -> R
-  {{{ 0, 0}, {-2, 0}, {+1, 0}, {-2,+1}, {+1,-2}},   // 3 -> L
-   {{ 0, 0}, {+1, 0}, {-2, 0}, {+1,+2}, {-2,-1}},}, // 3 -> R
-}
+LockDelayMode :: enum { GRAVITY, TIME_BASED, MOVE_RESET_CAPPED, MOVE_RESET_INFINITE }
+
+ColorScheme :: enum { SAPHIRE, RUBY, EMERALD, AMETHYST, CHERRY, TOOTHPASTE, ASH, WINE, BUBBLEGUM, CHARCOAL }
+
+FrameStyle :: struct { edge, corner: [2]int }
+FRAME_GAME :: FrameStyle{ edge = {2, 3}, corner = {1, 3} }
+FRAME_INFO :: FrameStyle{ edge = {4, 3}, corner = {3, 3} }
+
+PanelID :: enum { HOLD, BOARD, NEXT, STATS, LINES }
+Panel :: struct { bounds: rl.Rectangle, style: FrameStyle }
 
 TetrominoType :: enum { I, J, L, O, S, T, Z }
 Tetromino :: struct {
@@ -70,7 +57,34 @@ Tetromino :: struct {
   accum_y: f32,
   lock_timer_ms : f32, lock_resets : i32,
 }
-tetros : [TetrominoType]Tetromino = {
+
+// https://tetris.wiki/Super_Rotation_System (we invert y's because +y is down for us)
+// SRS wall kick tables: [rot_state][0:CCW, 1:CW][kick_test]
+@(rodata)
+KICKS_JLSTZ := [4][2][5][2]i32{
+  {{{ 0, 0}, {+1, 0}, {+1,-1}, { 0,+2}, {+1,+2}},   // 0 -> L
+   {{ 0, 0}, {-1, 0}, {-1,-1}, { 0,+2}, {-1,+2}},}, // 0 -> R
+  {{{ 0, 0}, {+1, 0}, {+1,+1}, { 0,-2}, {+1,-2}},   // 1 -> L
+   {{ 0, 0}, {+1, 0}, {+1,+1}, { 0,-2}, {+1,-2}},}, // 1 -> R
+  {{{ 0, 0}, {-1, 0}, {-1,-1}, { 0,+2}, {-1,+2}},   // 2 -> L
+   {{ 0, 0}, {+1, 0}, {+1,-1}, { 0,+2}, {+1,+2}},}, // 2 -> R
+  {{{ 0, 0}, {-1, 0}, {-1,+1}, { 0,-2}, {-1,-2}},   // 3 -> L
+   {{ 0, 0}, {-1, 0}, {-1,+1}, { 0,-2}, {-1,-2}},}, // 3 -> R
+}
+@(rodata)
+KICKS_I := [4][2][5][2]i32{
+  {{{ 0, 0}, {-1, 0}, {+2, 0}, {-1,-2}, {+2,+1}},   // 0 -> L
+   {{ 0, 0}, {-2, 0}, {+1, 0}, {-2,+1}, {+1,-2}},}, // 0 -> R
+  {{{ 0, 0}, {+2, 0}, {-1, 0}, {+2,-1}, {-1,+2}},   // 1 -> L
+   {{ 0, 0}, {-1, 0}, {+2, 0}, {-1,-2}, {+2,+1}},}, // 1 -> R
+  {{{ 0, 0}, {+1, 0}, {-2, 0}, {+1,+2}, {-2,-1}},   // 2 -> L
+   {{ 0, 0}, {+2, 0}, {-1, 0}, {+2,-1}, {-1,+2}},}, // 2 -> R
+  {{{ 0, 0}, {-2, 0}, {+1, 0}, {-2,+1}, {+1,-2}},   // 3 -> L
+   {{ 0, 0}, {+1, 0}, {-2, 0}, {+1,+2}, {-2,-1}},}, // 3 -> R
+}
+
+@(rodata)
+TETROS : [TetrominoType]Tetromino = {
   .I = { type = .I, box_sz = 4, minos = {{0,1},{1,1},{2,1},{3,1}} },
   .J = { type = .J, box_sz = 3, minos = {{0,0},{0,1},{1,1},{2,1}} },
   .L = { type = .L, box_sz = 3, minos = {{0,1},{1,1},{2,1},{2,0}} },
@@ -79,6 +93,11 @@ tetros : [TetrominoType]Tetromino = {
   .T = { type = .T, box_sz = 3, minos = {{0,1},{1,1},{1,0},{2,1}} },
   .Z = { type = .Z, box_sz = 3, minos = {{0,0},{1,0},{1,1},{2,1}} },
 }
+
+ATLAS_MINOS_OFFSET_Y_UNITS :: 4
+atlas_tex : rl.Texture2D
+font_map: [256][2]int
+ui_panels: [PanelID]Panel
 
 state : struct {
   cur, hold : Tetromino,
@@ -99,69 +118,215 @@ state : struct {
   zoom: f32,
 }
 
-ColorScheme :: enum { SAPHIRE, RUBY, EMERALD, AMETHYST, CHERRY, TOOTHPASTE, ASH, WINE, BUBBLEGUM, CHARCOAL }
-FrameStyles := [2]struct {edge, corner: [2]int} {
-  { edge = {2, 3}, corner = {1, 3} }, { edge = {4, 3}, corner = {3, 3} }
+init_game :: proc() {
+  init_ui :: proc() {
+    font_lines := [3]string{"ABCDEFGHIJKLMNOP", "QRSTUVWXYZ.!?-: ", "0123456789"}
+    for y in 0..<len(font_lines) {
+      for c, x in font_lines[y] {
+        if int(c) < 256 do font_map[int(c)] = {x, y}
+      }
+    }
+
+    // setup absolute bounds for each panel
+    ui_panels = {
+      .LINES = { rl.Rectangle{sx, sy - 4*unit_sz, g_width, unit_sz}, FRAME_INFO },
+      .BOARD = { rl.Rectangle{sx, sy, g_width, g_height}, FRAME_GAME },
+      .HOLD  = { rl.Rectangle{sx - 7*unit_sz, sy, 4*unit_sz, 4*unit_sz}, FRAME_GAME },
+      .STATS = { rl.Rectangle{sx - 9*unit_sz, sy+g_height-9*unit_sz, 6*unit_sz, 9*unit_sz}, FRAME_INFO },
+      .NEXT  = { rl.Rectangle{sx + g_width + 3*unit_sz, sy, 4*unit_sz, 11*unit_sz}, FRAME_GAME },
+    }
+  }
+
+  init_ui()
+  atlas_tex = rl.LoadTexture("res/atlas.png")
+  rl.SetTextureFilter(atlas_tex, .POINT)
+
+  state.bag = {}
+  state.first_piece_drawn = false
+  state.zoom = 1.0
+
+  for &t in state.next {
+    t = spawn_tetro()
+  }
+  state.cur = pop_next()
 }
 
-PanelID :: enum { HOLD, BOARD, NEXT, STATS, LINES }
-Panel :: struct { bounds: rl.Rectangle, frame_type: int }
+// random generator
+spawn_tetro :: proc() -> Tetromino {
+  if card(state.bag) == 0 {
+    state.bag = { .I, .J, .L, .O, .S, .T, .Z }
+  }
 
-atlas_tex : rl.Texture2D
-atlas_minos_offset_y_units :: 4
-atlas_ghost_minos_pos :: [2]int{0,3}
+  t_type: TetrominoType
+  ok: bool
+  if !state.first_piece_drawn {
+    t_type, ok = rand.choice_bit_set(bit_set[TetrominoType]{ .I, .J, .L, .T })
+    state.first_piece_drawn = true
+  } else {
+    t_type, ok = rand.choice_bit_set(state.bag)
+  }
 
-font_map: [256][2]int
-ui_panels: [PanelID]Panel
+  assert(ok)
+  state.bag -= { t_type }
+  when DBG do fmt.printfln("Bag: %v", state.bag)
+  t := TETROS[t_type]
+  // t.pos.x = rand.int32_range(0, GRID_WIDTH_UNITS-TETROS[t_type].box_sz+1)
+  t.pos.x = (t_type == .O) ? 4 : 3 // start in the center
+  t.pos.y = -2
+  return t
+}
+
+pop_next :: proc() -> Tetromino {
+  popped := state.next[0]
+  state.next[0] = state.next[1]
+  state.next[1] = state.next[2]
+  state.next[2] = spawn_tetro()
+  return popped
+}
+
+is_valid_placement :: proc(grid_x, grid_y: i32, minos: [][2]i32) -> bool {
+  for p in minos {
+    x, y := grid_x+p.x, grid_y+p.y
+    if x < 0 || x >= GRID_WIDTH_UNITS || y >= GRID_HEIGHT_UNITS || (y >= 0 && state.grid[y][x].filled) {
+      return false
+    }
+  }
+  return true
+}
+
+is_grounded :: proc() -> bool { return !is_valid_placement(state.cur.pos.x, state.cur.pos.y+1, state.cur.minos[:]) }
+
+try_move :: proc(dx, dy: i32) -> bool {
+  cur := &state.cur
+  if is_valid_placement(cur.pos.x+dx, cur.pos.y+dy, cur.minos[:]) {
+    cur.pos.x += dx
+    cur.pos.y += dy
+    if dx != 0  {
+      // horizontal movement triggers reset
+      trigger_lock_reset()
+    }
+    return true
+  }
+  return false
+}
+
+try_rotate :: proc(clockwise: bool) -> bool {
+  cur := &state.cur
+  if cur.type == .O {
+    return false
+  }
+
+  next_minos := cur.minos
+  for &p in next_minos {
+    if clockwise {
+      p.x, p.y = (cur.type == .I ? 3: 2)-p.y, p.x
+    } else {
+      p.x, p.y = p.y, (cur.type == .I ? 3: 2)-p.x
+    }
+  }
+
+  next_state := (cur.rot_state + (clockwise ? 1 : 3)) % 4
+  dir_idx := clockwise ? 1 : 0
+  kicks := cur.type == .I ? KICKS_I[cur.rot_state][dir_idx][:] : KICKS_JLSTZ[cur.rot_state][dir_idx][:]
+  for k in kicks {
+    if is_valid_placement(cur.pos.x+k.x, cur.pos.y+k.y, next_minos[:]) {
+      cur.minos = next_minos
+      cur.pos += k
+      cur.rot_state = next_state
+      trigger_lock_reset()
+      return true
+    }
+  }
+  return false
+}
+
+trigger_lock_reset :: proc() {
+  if LOCK_MODE == .GRAVITY || LOCK_MODE == .TIME_BASED {
+    return
+  }
+  if is_grounded() {
+    if LOCK_MODE == .MOVE_RESET_INFINITE {
+      state.cur.lock_timer_ms = 0.0
+    } else if LOCK_MODE == .MOVE_RESET_CAPPED {
+      fmt.printfln("reset: %v/%v", state.cur.lock_resets, MAX_LOCK_RESETS)
+      if state.cur.lock_resets < MAX_LOCK_RESETS {
+        state.cur.lock_timer_ms = 0.0
+        state.cur.lock_resets += 1
+      }
+    }
+  }
+}
+
+lock_tetro :: proc() {
+  state.hold_locked = false // reset hold lock
+  cur := &state.cur
+
+  for &p in cur.minos {
+    x, y := cur.pos.x+p.x, cur.pos.y+p.y
+    if x >= 0 && x < GRID_WIDTH_UNITS && y >= 0 && y < GRID_HEIGHT_UNITS {
+      state.grid[y][x] = { true, cur.type }
+    }
+  }
+
+  x, y, lines_cleared : i32
+  last_cleared_y : i32 = GRID_HEIGHT_UNITS - 1
+  for y = GRID_HEIGHT_UNITS-1; y >= 0; y -= 1 {
+    is_filled := true
+    for x = 0; x < GRID_WIDTH_UNITS; x += 1 {
+      if !state.grid[y][x].filled {
+        is_filled = false
+        break
+      }
+    }
+    if is_filled {
+      lines_cleared += 1
+    } else {
+      state.grid[last_cleared_y] = state.grid[y]
+      last_cleared_y -= 1
+    }
+  }
+  for y = last_cleared_y; y >= 0; y -= 1 {
+    state.grid[y] = {}
+  }
+  state.lines += lines_cleared
+}
+
+tick :: proc(dt_s, dt_ms: f32) {
+  cur := &state.cur
+  if is_grounded() {
+    cur.accum_y = 0.0 // turn off gravity, rely on lock delay
+    state.cur.lock_timer_ms += dt_ms
+    // fmcur.println(state.cur.lock_timer_ms, "/", LOCK_DELAY_MS)
+    if state.cur.lock_timer_ms >= LOCK_DELAY_MS {
+      lock_tetro()
+      state.cur = pop_next()
+    }
+    return
+  }
+
+  state.cur.lock_timer_ms = 0.0
+  cur.accum_y += FALL_SPEED * dt_s
+  dy := i32(cur.accum_y)
+  if dy > 0 {
+    cur.accum_y -= f32(dy)
+    // move down one space at a time
+    for i : i32 = 0; i < dy; i += 1 {
+      if !try_move(0, 1) {
+        // next frame will handle lock delay
+        break
+      }
+    }
+  }
+}
 
 atlas_render_sprite :: proc(src_x, src_y: int, dst: rl.Vector2, c: rl.Color = rl.WHITE) {
   src_rec := rl.Rectangle { f32(src_x*unit_sz), f32(src_y*unit_sz), unit_sz, unit_sz }
   rl.DrawTextureRec(atlas_tex, src_rec, dst, c)
 }
 
-find_char :: proc(c: rune) -> (src_x, src_y: int) {
-  idx := c < 256 ? c : '?'
-  return font_map[idx].x, font_map[idx].y
-}
-render_str :: proc(s: string, x, y: f32) {
-  dst_x, dst_y := x, y
-  for c in s {
-    if c == '\n' {
-      dst_y += 9
-      dst_x = x
-    } else {
-      src_x, src_y := find_char(c)
-      atlas_render_sprite(src_x, src_y, {dst_x, dst_y}, rl.WHITE)
-      dst_x += 8
-    }
-  }
-}
-
-render_panel :: proc(p: ^Panel) {
-  bx, by, bw, bh := p.bounds.x, p.bounds.y, p.bounds.width, p.bounds.height
-  style := FrameStyles[p.frame_type]
-
-  rl.DrawRectangleV({bx - unit_sz, by - unit_sz}, {bw + unit_sz*2, bh + unit_sz*2}, rl.BLACK)
-
-  ex, ey := f32(style.edge.x)*unit_sz, f32(style.edge.y)*unit_sz
-  cx, cy := f32(style.corner.x)*unit_sz, f32(style.corner.y)*unit_sz
-
-  // draw edges (stretch)
-  rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, unit_sz}, {bx, by - unit_sz, bw, unit_sz}, {0,0}, 0.0, rl.WHITE)
-  rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, -unit_sz}, {bx, by + bh, bw, unit_sz}, {0,0}, 0.0, rl.WHITE)
-  rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, unit_sz}, {bx - unit_sz, by + bh, bh, unit_sz}, {0,0}, -90.0, rl.WHITE)
-  rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, -unit_sz}, {bx + bw, by + bh, bh, unit_sz}, {0,0}, -90.0, rl.WHITE)
-
-  // draw corners
-  rl.DrawTextureRec(atlas_tex, {cx, cy, unit_sz, unit_sz}, {bx - unit_sz, by - unit_sz}, rl.WHITE)
-  rl.DrawTextureRec(atlas_tex, {cx, cy, -unit_sz, unit_sz}, {bx + bw, by - unit_sz}, rl.WHITE)
-  rl.DrawTextureRec(atlas_tex, {cx, cy, unit_sz, -unit_sz}, {bx - unit_sz, by + bh}, rl.WHITE)
-  rl.DrawTextureRec(atlas_tex, {cx, cy, -unit_sz, -unit_sz}, {bx + bw, by + bh}, rl.WHITE)
-}
-
 render_mino_absolute :: proc(px, py: f32, type: TetrominoType) {
   src_x := 0
-  src_y := atlas_minos_offset_y_units + int(state.theme)
+  src_y := ATLAS_MINOS_OFFSET_Y_UNITS + int(state.theme)
   switch type {
   case .L, .S: src_x = 0
   case .Z, .J: src_x = 1
@@ -170,7 +335,73 @@ render_mino_absolute :: proc(px, py: f32, type: TetrominoType) {
   atlas_render_sprite(src_x, src_y, {px, py})
 }
 
+render_playfield :: proc() {
+  for x in 0..<GRID_WIDTH_UNITS {
+    for y in 0..<GRID_HEIGHT_UNITS {
+      if state.grid[y][x].filled {
+        render_mino_absolute(f32(sx+x*unit_sz), f32(sy+y*unit_sz), state.grid[y][x].type)
+      }
+    }
+  }
+}
+
+render_ghost :: proc(t: ^Tetromino) {
+  ghost_y := t.pos.y
+  for is_valid_placement(t.pos.x, ghost_y + 1, t.minos[:]) {
+    ghost_y += 1
+  }
+  for &p in t.minos {
+    atlas_render_sprite(0, 3, {f32(sx+(t.pos.x+p.x)*unit_sz), f32(sy+(ghost_y+p.y)*unit_sz)})
+  }
+}
+
+render_tetro :: proc(t: ^Tetromino) {
+  for &p in t.minos {
+    render_mino_absolute(f32(sx+(t.pos.x+p.x)*unit_sz), f32(sy+(t.pos.y+p.y)*unit_sz), t.type)
+  }
+}
+
 render_ui :: proc() {
+  render_panel :: proc(p: ^Panel) {
+    bx, by, bw, bh := p.bounds.x, p.bounds.y, p.bounds.width, p.bounds.height
+
+    rl.DrawRectangleV({bx - unit_sz, by - unit_sz}, {bw + unit_sz*2, bh + unit_sz*2}, rl.BLACK)
+
+    ex, ey := f32(p.style.edge.x)*unit_sz, f32(p.style.edge.y)*unit_sz
+    cx, cy := f32(p.style.corner.x)*unit_sz, f32(p.style.corner.y)*unit_sz
+
+    // draw edges (stretch)
+    rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, unit_sz}, {bx, by - unit_sz, bw, unit_sz}, {0,0}, 0.0, rl.WHITE)
+    rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, -unit_sz}, {bx, by + bh, bw, unit_sz}, {0,0}, 0.0, rl.WHITE)
+    rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, unit_sz}, {bx - unit_sz, by + bh, bh, unit_sz}, {0,0}, -90.0, rl.WHITE)
+    rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, -unit_sz}, {bx + bw, by + bh, bh, unit_sz}, {0,0}, -90.0, rl.WHITE)
+
+    // draw corners
+    rl.DrawTextureRec(atlas_tex, {cx, cy, unit_sz, unit_sz}, {bx - unit_sz, by - unit_sz}, rl.WHITE)
+    rl.DrawTextureRec(atlas_tex, {cx, cy, -unit_sz, unit_sz}, {bx + bw, by - unit_sz}, rl.WHITE)
+    rl.DrawTextureRec(atlas_tex, {cx, cy, unit_sz, -unit_sz}, {bx - unit_sz, by + bh}, rl.WHITE)
+    rl.DrawTextureRec(atlas_tex, {cx, cy, -unit_sz, -unit_sz}, {bx + bw, by + bh}, rl.WHITE)
+  }
+
+  render_str :: proc(s: string, x, y: f32) {
+    find_char :: proc(c: rune) -> (src_x, src_y: int) {
+      idx := c < 256 ? c : '?'
+      return font_map[idx].x, font_map[idx].y
+    }
+
+    dst_x, dst_y := x, y
+    for c in s {
+      if c == '\n' {
+        dst_y += 9
+        dst_x = x
+      } else {
+        src_x, src_y := find_char(c)
+        atlas_render_sprite(src_x, src_y, {dst_x, dst_y}, rl.WHITE)
+        dst_x += 8
+      }
+    }
+  }
+
   for &p in ui_panels {
     render_panel(&p)
   }
@@ -203,229 +434,6 @@ render_ui :: proc() {
   }
 }
 
-render_playfield :: proc() {
-  for x in 0..<GRID_WIDTH_UNITS {
-    for y in 0..<GRID_HEIGHT_UNITS {
-      if state.grid[y][x].filled {
-        render_mino_absolute(f32(sx+x*unit_sz), f32(sy+y*unit_sz), state.grid[y][x].type)
-      }
-    }
-  }
-}
-
-render_ghost :: proc(t: ^Tetromino) {
-  ghost_y := t.pos.y
-  for is_valid_placement(t.pos.x, ghost_y + 1, t.minos[:]) {
-    ghost_y += 1
-  }
-  for &p in t.minos {
-    atlas_render_sprite(atlas_ghost_minos_pos.x, atlas_ghost_minos_pos.y, {f32(sx+(t.pos.x+p.x)*unit_sz), f32(sy+(ghost_y+p.y)*unit_sz)})
-  }
-}
-
-render_tetro :: proc(t: ^Tetromino) {
-  for &p in t.minos {
-    render_mino_absolute(f32(sx+(t.pos.x+p.x)*unit_sz), f32(sy+(t.pos.y+p.y)*unit_sz), t.type)
-  }
-}
-
-is_valid_placement :: proc(grid_x, grid_y: i32, minos: [][2]i32) -> bool {
-  for p in minos {
-    x, y := grid_x+p.x, grid_y+p.y
-    if x < 0 || x >= GRID_WIDTH_UNITS || y >= GRID_HEIGHT_UNITS || (y >= 0 && state.grid[y][x].filled) {
-      return false
-    }
-  }
-  return true
-}
-
-is_grounded :: proc(t: ^Tetromino) -> bool { return !is_valid_placement(t.pos.x, t.pos.y+1, t.minos[:]) }
-
-trigger_lock_reset :: proc() {
-  if LOCK_MODE == .GRAVITY || LOCK_MODE == .TIME_BASED {
-    return
-  }
-  if is_grounded(&state.cur) {
-    if LOCK_MODE == .MOVE_RESET_INFINITE {
-      state.cur.lock_timer_ms = 0.0
-    } else if LOCK_MODE == .MOVE_RESET_CAPPED {
-      fmt.printfln("reset: %v/%v", state.cur.lock_resets, MAX_LOCK_RESETS)
-      if state.cur.lock_resets < MAX_LOCK_RESETS {
-        state.cur.lock_timer_ms = 0.0
-        state.cur.lock_resets += 1
-      }
-    }
-  }
-}
-
-tick :: proc(t: ^Tetromino, dt_s, dt_ms: f32) {
-  if is_grounded(t) {
-    t.accum_y = 0.0 // turn off gravity, rely on lock delay
-    state.cur.lock_timer_ms += dt_ms
-    // fmt.println(state.cur.lock_timer_ms, "/", LOCK_DELAY_MS)
-    if state.cur.lock_timer_ms >= LOCK_DELAY_MS {
-      lock_tetro(t)
-      state.cur = pop_next()
-    }
-    return
-  }
-
-  state.cur.lock_timer_ms = 0.0
-  t.accum_y += FALL_SPEED * dt_s
-  dy := i32(t.accum_y)
-  if dy > 0 {
-    t.accum_y -= f32(dy)
-    // move down one space at a time
-    for i : i32 = 0; i < dy; i += 1 {
-      if !try_move(t, 0, 1) {
-        // next frame will handle lock delay
-        break
-      }
-    }
-  }
-}
-
-try_rotate :: proc(t: ^Tetromino, clockwise: bool) -> bool {
-  if t.type == .O {
-    return false
-  }
-
-  next_minos := t.minos
-  for &p in next_minos {
-    if clockwise {
-      p.x, p.y = (t.type == .I ? 3: 2)-p.y, p.x
-    } else {
-      p.x, p.y = p.y, (t.type == .I ? 3: 2)-p.x
-    }
-  }
-
-  next_state := (t.rot_state + (clockwise ? 1 : 3)) % 4
-  dir_idx := clockwise ? 1 : 0
-  kicks := t.type == .I ? KICKS_I[t.rot_state][dir_idx][:] : KICKS_JLSTZ[t.rot_state][dir_idx][:]
-  for k in kicks {
-    if is_valid_placement(t.pos.x+k.x, t.pos.y+k.y, next_minos[:]) {
-      t.minos = next_minos
-      t.pos += k
-      t.rot_state = next_state
-      trigger_lock_reset()
-      return true
-    }
-  }
-  return false
-}
-
-try_move :: proc(t: ^Tetromino, dx, dy: i32) -> bool {
-  if is_valid_placement(t.pos.x+dx, t.pos.y+dy, t.minos[:]) {
-    t.pos.x += dx
-    t.pos.y += dy
-    if dx != 0  {
-      // horizontal movement triggers reset
-      trigger_lock_reset()
-    }
-    return true
-  }
-  return false
-}
-
-// random generator
-spawn_tetro :: proc() -> Tetromino {
-  if card(state.bag) == 0 {
-    state.bag = { .I, .J, .L, .O, .S, .T, .Z }
-  }
-
-  t_type: TetrominoType
-  ok: bool
-  if !state.first_piece_drawn {
-    t_type, ok = rand.choice_bit_set(bit_set[TetrominoType]{ .I, .J, .L, .T })
-    state.first_piece_drawn = true
-  } else {
-    t_type, ok = rand.choice_bit_set(state.bag)
-  }
-
-  assert(ok)
-  state.bag -= { t_type }
-  when DBG do fmt.printfln("Bag: %v", state.bag)
-  t := tetros[t_type]
-  // t.pos.x = rand.int32_range(0, GRID_WIDTH_UNITS-tetros[t_type].box_sz+1)
-  t.pos.x = (t_type == .O) ? 4 : 3 // start in the center
-  t.pos.y = -2
-  return t
-}
-
-pop_next :: proc() -> Tetromino {
-  popped := state.next[0]
-  state.next[0] = state.next[1]
-  state.next[1] = state.next[2]
-  state.next[2] = spawn_tetro()
-  return popped
-}
-
-lock_tetro :: proc(t: ^Tetromino) {
-  state.hold_locked = false // reset hold lock
-
-  for &p in t.minos {
-    x, y := t.pos.x+p.x, t.pos.y+p.y
-    if x >= 0 && x < GRID_WIDTH_UNITS && y >= 0 && y < GRID_HEIGHT_UNITS {
-      state.grid[y][x] = { true, t.type }
-    }
-  }
-
-  x, y, lines_cleared : i32
-  last_cleared_y : i32 = GRID_HEIGHT_UNITS - 1
-  for y = GRID_HEIGHT_UNITS-1; y >= 0; y -= 1 {
-    is_filled := true
-    for x = 0; x < GRID_WIDTH_UNITS; x += 1 {
-      if !state.grid[y][x].filled {
-        is_filled = false
-        break
-      }
-    }
-    if is_filled {
-      lines_cleared += 1
-    } else {
-      state.grid[last_cleared_y] = state.grid[y]
-      last_cleared_y -= 1
-    }
-  }
-  for y = last_cleared_y; y >= 0; y -= 1 {
-    state.grid[y] = {}
-  }
-  state.lines += lines_cleared
-}
-
-init_ui :: proc() {
-  font_lines := [3]string{"ABCDEFGHIJKLMNOP", "QRSTUVWXYZ.!?-: ", "0123456789"}
-  for y in 0..<len(font_lines) {
-    for c, x in font_lines[y] {
-      if int(c) < 256 do font_map[int(c)] = {x, y}
-    }
-  }
-
-  // setup absolute bounds for each panel
-  ui_panels = {
-    .LINES = { rl.Rectangle{sx, sy - 4*unit_sz, g_width, unit_sz}, 1 },
-    .BOARD = { rl.Rectangle{sx, sy, g_width, g_height}, 0 },
-    .HOLD  = { rl.Rectangle{sx - 7*unit_sz, sy, 4*unit_sz, 4*unit_sz}, 0 },
-    .STATS = { rl.Rectangle{sx - 9*unit_sz, sy+g_height-9*unit_sz, 6*unit_sz, 9*unit_sz}, 1 },
-    .NEXT  = { rl.Rectangle{sx + g_width + 3*unit_sz, sy, 4*unit_sz, 11*unit_sz}, 0 },
-  }
-}
-
-init_game :: proc() {
-  init_ui()
-  atlas_tex = rl.LoadTexture("res/atlas.png")
-  rl.SetTextureFilter(atlas_tex, .POINT)
-
-  state.bag = {}
-  state.first_piece_drawn = false
-  state.zoom = 1.0
-
-  for &t in state.next {
-    t = spawn_tetro()
-  }
-  state.cur = pop_next()
-}
-
 main :: proc() {
   rl.SetConfigFlags({.WINDOW_RESIZABLE})
   rl.InitWindow(WINDOW_WIDTH_PX, WINDOW_HEIGHT_PX, "tetris")
@@ -439,7 +447,7 @@ main :: proc() {
   defer rl.UnloadRenderTexture(target)
   rl.SetTextureFilter(target.texture, .POINT)
 
-  dbg_tetros := tetros
+  dbg_tetros := TETROS
   for !rl.WindowShouldClose() {
     dt_s := rl.GetFrameTime()
     dt_ms := dt_s * 1000.0
@@ -449,14 +457,14 @@ main :: proc() {
       for is_valid_placement(state.cur.pos.x, state.cur.pos.y+1, state.cur.minos[:]) {
         state.cur.pos.y += 1
       }
-      lock_tetro(&state.cur)
+      lock_tetro()
       state.cur = pop_next()
     }
 
     if rl.IsKeyPressed(.UP) || rl.IsKeyPressed(.X) {
-      try_rotate(&state.cur, true)
+      try_rotate(true)
     } else if rl.IsKeyPressed(.Z) {
-      try_rotate(&state.cur, false)
+      try_rotate(false)
     }
 
     if rl.IsKeyDown(.DOWN) {
@@ -468,11 +476,11 @@ main :: proc() {
     if first_left {
       state.active_dir = -1
       state.das_timer_ms, state.arr_timer_ms = 0.0, 0.0
-      try_move(&state.cur, -1, 0)
+      try_move(-1, 0)
     } else if first_right {
       state.active_dir = 1
       state.das_timer_ms, state.arr_timer_ms = 0.0, 0.0
-      try_move(&state.cur, 1, 0)
+      try_move(1, 0)
     }
 
     is_active_key_held := (state.active_dir == -1 && left_down) || (state.active_dir == 1 && right_down)
@@ -481,7 +489,7 @@ main :: proc() {
       if state.das_timer_ms >= DAS_DELAY_MS {
         state.arr_timer_ms += dt_ms
         for state.arr_timer_ms >= ARR_DELAY_MS {
-          try_move(&state.cur, state.active_dir, 0)
+          try_move(state.active_dir, 0)
           state.arr_timer_ms -= ARR_DELAY_MS
         }
       }
@@ -500,9 +508,9 @@ main :: proc() {
     if rl.IsKeyPressed(.C) {
       if !state.hold_locked {
         if state.is_holding_tetro {
-          state.hold, state.cur = tetros[state.cur.type], state.hold
+          state.hold, state.cur = TETROS[state.cur.type], state.hold
         } else {
-          state.hold = tetros[state.cur.type]
+          state.hold = TETROS[state.cur.type]
           state.cur = pop_next()
           state.is_holding_tetro = true
         }
@@ -519,7 +527,7 @@ main :: proc() {
       state.zoom = min(4.0, state.zoom + 0.25)
     }
 
-    tick(&state.cur, dt_s, dt_ms)
+    tick(dt_s, dt_ms)
 
     // first pass drawing (render to canvas)
     rl.BeginTextureMode(target)
