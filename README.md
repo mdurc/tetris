@@ -1,6 +1,17 @@
 ## Tetris - Rewritten in Odin (from C)
 
-Written with Raylib. After installing odin, build with `just`
+Written with Raylib.
+```zsh
+# Installation:
+$ brew install odin
+
+# Build and run with:
+$ odin run .
+
+# Or build an executable with:
+$ odin build .
+$ ./tetris
+```
 
 First time exploring Odin and it's been an extremely enjoyable experience.
 
