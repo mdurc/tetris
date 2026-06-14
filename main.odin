@@ -7,6 +7,7 @@ import rl "vendor:raylib"
 
 DBG :: #config(DBG, false)
 
+// windowing
 WINDOW_WIDTH_PX, WINDOW_HEIGHT_PX :: 1280, 960
 BG_COLOR :: rl.Color{0x28, 0x29, 0x23, 0xFF}
 
@@ -27,15 +28,25 @@ GAME_START_Y_PX :: ((RENDER_HEIGHT_PX - GRID_HEIGHT_PX) / 2) + GRID_UNIT_SIZE_PX
 g_width, g_height :: GRID_WIDTH_PX, GRID_HEIGHT_PX
 unit_sz, sx, sy :: GRID_UNIT_SIZE_PX, GRID_START_X_PX, GAME_START_Y_PX
 
+// movement
 FALL_SPEED :: 1.0 // grid cell/second
 SOFT_SPEED :: FALL_SPEED * 15
 
 DAS_DELAY_MS :: 180.0  // initial delay before repeating (delayed-auto-shift)
 ARR_DELAY_MS :: 40.0   // delay between repeated movements (auto-repeat-rate)
 LOCK_DELAY_MS :: 500.0 // time a tetro waits on the ground before locking
-
 LOCK_MODE :: LockDelayMode.MOVE_RESET_CAPPED
 MAX_LOCK_RESETS :: 15
+
+// scoring
+SCORE_SINGLE :: 100
+SCORE_DOUBLE :: 300
+SCORE_TRIPLE :: 500
+SCORE_TETRIS :: 800
+SCORE_SOFT_DROP :: 1
+SCORE_HARD_DROP :: 2
+LINES_PER_LEVEL :: 10
+SPEED_INCREASE_PER_LEVEL :: 0.5 // Grid cells per second added per level
 
 LockDelayMode :: enum { GRAVITY, TIME_BASED, MOVE_RESET_CAPPED, MOVE_RESET_INFINITE }
 
@@ -289,10 +300,25 @@ lock_tetro :: proc() {
   for y = last_cleared_y; y >= 0; y -= 1 {
     state.grid[y] = {}
   }
-  state.lines += lines_cleared
+
+  if lines_cleared > 0 {
+    state.lines += lines_cleared
+    state.level = state.lines / LINES_PER_LEVEL
+    multiplier := state.level + 1 // level 0 is multiplier 1
+    switch lines_cleared {
+    case 1: state.score += SCORE_SINGLE*multiplier
+    case 2: state.score += SCORE_DOUBLE*multiplier
+    case 3: state.score += SCORE_TRIPLE*multiplier
+    case 4: state.score += SCORE_TETRIS*multiplier
+    }
+  }
+
+  if state.score > state.high_score {
+    state.high_score = state.score
+  }
 }
 
-tick :: proc(dt_s, dt_ms: f32) {
+tick :: proc(dt_s, dt_ms: f32, is_soft_dropping: bool) {
   cur := &state.cur
   if is_grounded() {
     cur.accum_y = 0.0 // turn off gravity, rely on lock delay
@@ -306,13 +332,23 @@ tick :: proc(dt_s, dt_ms: f32) {
   }
 
   state.cur.lock_timer_ms = 0.0
-  cur.accum_y += FALL_SPEED * dt_s
+
+  // dynamic gravity based on level
+  base_fall_speed := FALL_SPEED + (f32(state.level) * SPEED_INCREASE_PER_LEVEL)
+  current_speed := is_soft_dropping ? (base_fall_speed * SOFT_SPEED) : base_fall_speed
+
+  cur.accum_y += current_speed * dt_s
   dy := i32(cur.accum_y)
+
   if dy > 0 {
     cur.accum_y -= f32(dy)
     // move down one space at a time
     for i : i32 = 0; i < dy; i += 1 {
-      if !try_move(0, 1) {
+      if try_move(0, 1) {
+        if is_soft_dropping {
+          state.score += SCORE_SOFT_DROP
+        }
+      } else {
         // next frame will handle lock delay
         break
       }
@@ -487,19 +523,19 @@ main :: proc() {
 
     // handle verticle movement and rotations
     if pressed_hard_drop {
+      drop_distance : i32 = 0
       for is_valid_placement(state.cur.pos.x, state.cur.pos.y+1, state.cur.minos[:]) {
         state.cur.pos.y += 1
+        drop_distance += 1
       }
+      state.score += drop_distance * SCORE_HARD_DROP
       lock_tetro()
       state.cur = pop_next()
     }
+    // soft drop is handled in the tick() call
 
     if pressed_rot_cw do try_rotate(true);
     if pressed_rot_ccw do try_rotate(false);
-
-    if holding_soft_drop {
-      state.cur.accum_y += SOFT_SPEED*dt_s
-    }
 
     // handle horizontal movement
     first_left, first_right := rl.IsKeyPressed(.LEFT), rl.IsKeyPressed(.RIGHT)
@@ -559,7 +595,7 @@ main :: proc() {
       state.zoom = min(4.0, state.zoom + 0.25)
     }
 
-    tick(dt_s, dt_ms)
+    tick(dt_s, dt_ms, holding_soft_drop)
 
     // first pass drawing (render to canvas)
     rl.BeginTextureMode(target)
