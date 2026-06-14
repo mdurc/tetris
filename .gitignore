@@ -1,4 +1,4 @@
 *.dSYM
 *.aseprite
 highscore.txt
-
+config.json

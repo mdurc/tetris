@@ -6,6 +6,7 @@ import "core:strconv"
 import "core:math"
 import "core:math/rand"
 import rl "vendor:raylib"
+import "core:encoding/json"
 
 DBG :: #config(DBG, false)
 
@@ -45,15 +46,16 @@ SCORE_TETRIS :: 800
 SCORE_SOFT_DROP :: 1
 SCORE_HARD_DROP :: 2
 LINES_PER_LEVEL :: 10
-SPEED_INCREASE_PER_LEVEL :: 0.5 // Grid cells per second added per level
+SPEED_INCREASE_PER_LEVEL :: 0.5 // grid cells per second added per level
 HIGH_SCORE_FILE :: "highscore.txt"
+CONFIG_FILE :: "config.json"
 
 // -- config --
 ProgramMode :: enum { PLAYING, MENU }
-MenuOption :: enum { GHOST, VFX, SFX, SHOW_UI, SHOW_NEXT, NUM_NEXT_PREVIEW, DAS_MS, ARR_MS, LOCK_MODE, MOUSE_CTRL, RESET_CFG, RESTART, RESET_HS }
+MenuOption :: enum { GHOST, SFX, SHOW_UI, SHOW_NEXT, NUM_NEXT_PREVIEW, DAS_MS, ARR_MS, LOCK_MODE, MOUSE_CTRL, RESET_CFG, SAVE_CFG, RESTART, RESET_HS }
 LockDelayMode :: enum { GRAVITY, TIME_BASED, RESET_CAPPED, RESET_INFINITE }
 Config :: struct {
-  show_ghost, vfx_enabled, sfx_enabled, mouse_enabled, show_all_ui, show_next: bool,
+  show_ghost, sfx_enabled, mouse_enabled, show_all_ui, show_next: bool,
   num_next: int,
   das_ms: f32,
   arr_ms: f32,
@@ -63,7 +65,7 @@ Config :: struct {
 OPTION_MENU_ICON :: rl.Rectangle{ sx+g_width+unit_sz*4, sy-unit_sz*4, unit_sz, unit_sz }
 
 DEFAULT_CONFIG :: Config {
-  show_ghost = true, vfx_enabled = true, sfx_enabled = true,
+  show_ghost = true, sfx_enabled = true,
   mouse_enabled = true, show_all_ui = true, show_next = true,
   num_next = 3,
   das_ms = 180.0, // initial delay before repeating (delayed-auto-shift)
@@ -160,9 +162,9 @@ font_map: [ASCII_MAX][2]int
 ui_panels: [PanelID]Panel
 
 load_high_score :: proc() {
-	data, err := os.read_entire_file(HIGH_SCORE_FILE, context.allocator)
+  data, err := os.read_entire_file(HIGH_SCORE_FILE, context.allocator)
   if err != nil {
-    fmt.println("ERROR: failed to read file", HIGH_SCORE_FILE)
+    fmt.printfln("ERROR: failed to read file %s.", HIGH_SCORE_FILE)
     return
   }
   defer delete(data, context.allocator)
@@ -177,20 +179,49 @@ save_high_score :: proc() {
   str := fmt.bprintf(buf[:], "%d", state.high_score)
   err := os.write_entire_file(HIGH_SCORE_FILE, str)
   if err != nil {
-    fmt.println("ERROR: failed to write file", HIGH_SCORE_FILE)
+    fmt.printfln("ERROR: failed to write file %s.", HIGH_SCORE_FILE)
     return
   }
   fmt.printfln("Saved highscore %d to file: %s.", state.high_score, HIGH_SCORE_FILE)
 }
 
+load_config :: proc() {
+  data, err := os.read_entire_file(CONFIG_FILE, context.allocator)
+  if err != nil {
+    fmt.printfln("ERROR: failed to read file %s.", CONFIG_FILE)
+    return
+  }
+  defer delete(data, context.allocator)
+  json.unmarshal(data, &state.config)
+}
+
+save_config :: proc() {
+  data, err_m := json.marshal(state.config, {pretty = true})
+  if err_m != nil {
+    fmt.println("ERROR: failed to marshal config.")
+    return
+  }
+  defer delete(data)
+
+  err := os.write_entire_file(CONFIG_FILE, data)
+  if err != nil {
+    fmt.printfln("ERROR: failed to write file %s.", CONFIG_FILE)
+    return
+  }
+  fmt.printfln("Saved config to file: %s.", CONFIG_FILE)
+}
+
 reset_state :: proc(first_time_init: bool) {
   old := state
   state = {}
+  state.mode = .PLAYING
   state.config = first_time_init ? DEFAULT_CONFIG: old.config
   state.zoom = first_time_init ? 1.0: old.zoom
   state.theme = first_time_init ? .CHERRY: old.theme
   state.high_score = old.high_score
   if first_time_init {
+    // attempt loads
+    load_config()
     load_high_score()
   }
   for &t in state.next {
@@ -569,7 +600,6 @@ render_menu :: proc() {
     str: string
     switch MenuOption(i) {
     case .GHOST: str = fmt.bprintf(buf[:], "GHOST: %s", state.config.show_ghost ? "ON":"OFF")
-    case .VFX: str = fmt.bprintf(buf[:], "VFX: %s", state.config.vfx_enabled ? "ON":"OFF")
     case .SFX: str = fmt.bprintf(buf[:], "SFX: %s", state.config.sfx_enabled ? "ON":"OFF")
     case .SHOW_UI: str = fmt.bprintf(buf[:], "SHOW UI: %s", state.config.show_all_ui ? "ON":"OFF")
     case .SHOW_NEXT: str = fmt.bprintf(buf[:], "SHOW NEXT: %s", state.config.show_next ? "ON":"OFF")
@@ -579,6 +609,7 @@ render_menu :: proc() {
     case .LOCK_MODE: str = fmt.bprintf(buf[:], "LOCK: %s", state.config.lock_mode)
     case .MOUSE_CTRL: str = fmt.bprintf(buf[:], "MOUSE: %s", state.config.mouse_enabled ? "ON":"OFF")
     case .RESET_CFG: str = "RESET CONFIG"
+    case .SAVE_CFG: str = "SAVE CONFIG"
     case .RESTART: str = "RESTART GAME"
     case .RESET_HS: str = "RESET HIGHSCORE"
     }
@@ -652,7 +683,6 @@ main :: proc() {
       if dir != 0 || action {
         switch MenuOption(state.menu_idx) {
         case .GHOST: state.config.show_ghost = !state.config.show_ghost
-        case .VFX: state.config.vfx_enabled = !state.config.vfx_enabled
         case .SFX: state.config.sfx_enabled = !state.config.sfx_enabled
         case .SHOW_UI: state.config.show_all_ui = !state.config.show_all_ui
         case .SHOW_NEXT: state.config.show_next = !state.config.show_next
@@ -668,10 +698,8 @@ main :: proc() {
           state.config.lock_mode = LockDelayMode(val)
         case .MOUSE_CTRL: state.config.mouse_enabled = !state.config.mouse_enabled
         case .RESET_CFG: if action { state.config = DEFAULT_CONFIG }
-        case .RESTART:
-          if action {
-            reset_state(false)
-          }
+        case .SAVE_CFG: if action { save_config() }
+        case .RESTART: if action { reset_state(false) }
         case .RESET_HS:
           if action {
             state.high_score = 0
