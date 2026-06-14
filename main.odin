@@ -52,7 +52,7 @@ CONFIG_FILE :: "config.json"
 
 // -- config --
 ProgramMode :: enum { PLAYING, MENU }
-MenuOption :: enum { GHOST, SFX, SHOW_UI, SHOW_NEXT, NUM_NEXT_PREVIEW, DAS_MS, ARR_MS, LOCK_MODE, MOUSE_CTRL, RESET_CFG, SAVE_CFG, RESTART, RESET_HS }
+MenuOption :: enum { GHOST, SFX, SHOW_UI, SHOW_NEXT, NUM_NEXT_PREVIEW, DAS_MS, ARR_MS, LOCK_MODE, MOUSE_CTRL, THEME, RESET_CFG, SAVE_CFG, RESTART, RESET_HS }
 LockDelayMode :: enum { GRAVITY, TIME_BASED, RESET_CAPPED, RESET_INFINITE }
 Config :: struct {
   show_ghost, sfx_enabled, mouse_enabled, show_all_ui, show_next: bool,
@@ -60,6 +60,7 @@ Config :: struct {
   das_ms: f32,
   arr_ms: f32,
   lock_mode: LockDelayMode,
+  theme: ColorScheme,
 }
 
 OPTION_MENU_ICON :: rl.Rectangle{ sx+g_width+unit_sz*4, sy-unit_sz*4, unit_sz, unit_sz }
@@ -71,6 +72,7 @@ DEFAULT_CONFIG :: Config {
   das_ms = 180.0, // initial delay before repeating (delayed-auto-shift)
   arr_ms = 40.0,  // delay between repeated movements (auto-repeat-rate)
   lock_mode = .RESET_CAPPED,
+  theme = .CHERRY,
 }
 
 // -- styling --
@@ -151,8 +153,11 @@ State :: struct {
   das_timer_ms, arr_timer_ms : f32,
   active_dir : i32, // -1 for left, 1 for right, 0 for none
 
-  theme: ColorScheme,
   zoom: f32,
+
+  sounds: struct {
+    place, clear: rl.Sound,
+  },
 }
 
 // -- mutable globals --
@@ -217,7 +222,6 @@ reset_state :: proc(first_time_init: bool) {
   state.mode = .PLAYING
   state.config = first_time_init ? DEFAULT_CONFIG: old.config
   state.zoom = first_time_init ? 1.0: old.zoom
-  state.theme = first_time_init ? .CHERRY: old.theme
   state.high_score = old.high_score
   if first_time_init {
     // attempt loads
@@ -257,9 +261,6 @@ init_game :: proc() {
   }
 
   init_ui()
-  atlas_tex = rl.LoadTexture("res/atlas.png")
-  rl.SetTextureFilter(atlas_tex, .POINT)
-
   reset_state(true)
 }
 
@@ -410,6 +411,9 @@ lock_tetro :: proc() {
     case 3: state.score += SCORE_TRIPLE*multiplier
     case 4: state.score += SCORE_TETRIS*multiplier
     }
+    play_sfx(state.sounds.clear)
+  } else {
+    play_sfx(state.sounds.place)
   }
 
   if state.score > state.high_score {
@@ -464,7 +468,7 @@ atlas_render_sprite :: proc(src_x, src_y: int, dst: rl.Vector2, c: rl.Color = rl
 
 render_mino_absolute :: proc(px, py: f32, type: TetrominoType) {
   src_x := 0
-  src_y := 6 + int(state.theme) // ATLAS_MINOS_OFFSET_Y_UNITS :: 6
+  src_y := 6 + int(state.config.theme) // ATLAS_MINOS_OFFSET_Y_UNITS :: 6
   switch type {
   case .L, .S: src_x = 0
   case .Z, .J: src_x = 1
@@ -608,6 +612,7 @@ render_menu :: proc() {
     case .ARR_MS: str = fmt.bprintf(buf[:], "ARR MS: %.0f", state.config.arr_ms)
     case .LOCK_MODE: str = fmt.bprintf(buf[:], "LOCK: %s", state.config.lock_mode)
     case .MOUSE_CTRL: str = fmt.bprintf(buf[:], "MOUSE: %s", state.config.mouse_enabled ? "ON":"OFF")
+    case .THEME: str = fmt.bprintf(buf[:], "THEME: %s", state.config.theme)
     case .RESET_CFG: str = "RESET CONFIG"
     case .SAVE_CFG: str = "SAVE CONFIG"
     case .RESTART: str = "RESTART GAME"
@@ -623,6 +628,12 @@ render_menu :: proc() {
   render_str(keybinds, ui_panels[.MENU].bounds.x, ui_panels[.MENU].bounds.y+ui_panels[.MENU].bounds.height-unit_sz*7, rl.LIGHTGRAY)
 }
 
+play_sfx :: proc(sound: rl.Sound) {
+  if state.config.sfx_enabled {
+    rl.PlaySound(sound)
+  }
+}
+
 main :: proc() {
   rl.SetConfigFlags({.WINDOW_RESIZABLE})
   rl.InitWindow(WINDOW_WIDTH_PX, WINDOW_HEIGHT_PX, "tetris")
@@ -630,7 +641,19 @@ main :: proc() {
   rl.SetExitKey(.KEY_NULL)
 
   init_game()
+
+  atlas_tex = rl.LoadTexture("res/atlas.png")
   defer rl.UnloadTexture(atlas_tex)
+  rl.SetTextureFilter(atlas_tex, .POINT)
+
+  rl.InitAudioDevice()
+  state.sounds.place = rl.LoadSound("res/place.mp3")
+  state.sounds.clear = rl.LoadSound("res/clear.wav")
+  defer {
+    rl.UnloadSound(state.sounds.place)
+    rl.UnloadSound(state.sounds.clear)
+    rl.CloseAudioDevice()
+  }
 
   // create the render canvas
   target := rl.LoadRenderTexture(RENDER_WIDTH_PX, RENDER_HEIGHT_PX)
@@ -680,6 +703,7 @@ main :: proc() {
 
       dir := -1 if rl.IsKeyPressed(.LEFT) else 1 if rl.IsKeyPressed(.RIGHT) else 0
       action := rl.IsKeyPressed(.ENTER) || rl.IsKeyPressed(.SPACE) || mouse_click
+      step := (dir == 0 ? 1 : dir)
       if dir != 0 || action {
         switch MenuOption(state.menu_idx) {
         case .GHOST: state.config.show_ghost = !state.config.show_ghost
@@ -687,16 +711,18 @@ main :: proc() {
         case .SHOW_UI: state.config.show_all_ui = !state.config.show_all_ui
         case .SHOW_NEXT: state.config.show_next = !state.config.show_next
         case .NUM_NEXT_PREVIEW:
-          state.config.num_next = ((state.config.num_next - 1 + (dir == 0 ? 1 : dir) + 3) % 3) + 1
+          state.config.num_next = ((state.config.num_next - 1 + step + 3) % 3) + 1
         case .DAS_MS:
-          state.config.das_ms = clamp(state.config.das_ms + f32((dir == 0 ? 1: dir) * 10), 20, 500)
+          state.config.das_ms = clamp(state.config.das_ms + f32(step * 10), 20, 500)
         case .ARR_MS:
-          state.config.arr_ms = clamp(state.config.arr_ms + f32((dir == 0 ? 1: dir) * 5), 20, 500)
+          state.config.arr_ms = clamp(state.config.arr_ms + f32(step * 5), 20, 500)
         case .LOCK_MODE:
-          val := int(state.config.lock_mode) + (dir == 0 ? 1: dir)
-          val = (val < 0 ? 3: val > 3 ? 0: val)
+          val := (int(state.config.lock_mode) + step + len(LockDelayMode)) % len(LockDelayMode)
           state.config.lock_mode = LockDelayMode(val)
         case .MOUSE_CTRL: state.config.mouse_enabled = !state.config.mouse_enabled
+        case .THEME:
+          val := (int(state.config.theme) + step + len(ColorScheme)) % len(ColorScheme)
+          state.config.theme = ColorScheme(val)
         case .RESET_CFG: if action { state.config = DEFAULT_CONFIG }
         case .SAVE_CFG: if action { save_config() }
         case .RESTART: if action { reset_state(false) }
