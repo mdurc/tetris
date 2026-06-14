@@ -9,7 +9,7 @@ import rl "vendor:raylib"
 
 DBG :: #config(DBG, false)
 
-// windowing
+// -- windowing & rendering --
 WINDOW_WIDTH_PX, WINDOW_HEIGHT_PX :: 1280, 960
 BG_COLOR :: rl.Color{0x28, 0x29, 0x23, 0xFF}
 
@@ -30,17 +30,14 @@ GAME_START_Y_PX :: ((RENDER_HEIGHT_PX - GRID_HEIGHT_PX) / 2) + GRID_UNIT_SIZE_PX
 g_width, g_height :: GRID_WIDTH_PX, GRID_HEIGHT_PX
 unit_sz, sx, sy :: GRID_UNIT_SIZE_PX, GRID_START_X_PX, GAME_START_Y_PX
 
-// movement
+// -- movement --
 FALL_SPEED :: 1.0 // grid cell/second
 SOFT_SPEED :: FALL_SPEED * 15
 
-DAS_DELAY_MS :: 180.0  // initial delay before repeating (delayed-auto-shift)
-ARR_DELAY_MS :: 40.0   // delay between repeated movements (auto-repeat-rate)
 LOCK_DELAY_MS :: 500.0 // time a tetro waits on the ground before locking
-LOCK_MODE :: LockDelayMode.MOVE_RESET_CAPPED
 MAX_LOCK_RESETS :: 15
 
-// scoring
+// -- scoring --
 SCORE_SINGLE :: 100
 SCORE_DOUBLE :: 300
 SCORE_TRIPLE :: 500
@@ -51,27 +48,40 @@ LINES_PER_LEVEL :: 10
 SPEED_INCREASE_PER_LEVEL :: 0.5 // Grid cells per second added per level
 HIGH_SCORE_FILE :: "highscore.txt"
 
-LockDelayMode :: enum { GRAVITY, TIME_BASED, MOVE_RESET_CAPPED, MOVE_RESET_INFINITE }
+// -- config --
+ProgramMode :: enum { PLAYING, MENU }
+MenuOption :: enum { GHOST, VFX, SFX, SHOW_UI, SHOW_NEXT, NUM_NEXT_PREVIEW, DAS_MS, ARR_MS, LOCK_MODE, MOUSE_CTRL, RESET_CFG, RESTART, RESET_HS }
+LockDelayMode :: enum { GRAVITY, TIME_BASED, RESET_CAPPED, RESET_INFINITE }
+Config :: struct {
+  show_ghost, vfx_enabled, sfx_enabled, mouse_enabled, show_all_ui, show_next: bool,
+  num_next: int,
+  das_ms: f32,
+  arr_ms: f32,
+  lock_mode: LockDelayMode,
+}
 
+OPTION_MENU_ICON :: rl.Rectangle{ sx+g_width+unit_sz*4, sy-unit_sz*4, unit_sz, unit_sz }
+
+DEFAULT_CONFIG :: Config {
+  show_ghost = true, vfx_enabled = true, sfx_enabled = true,
+  mouse_enabled = true, show_all_ui = true, show_next = true,
+  num_next = 3,
+  das_ms = 180.0, // initial delay before repeating (delayed-auto-shift)
+  arr_ms = 40.0,  // delay between repeated movements (auto-repeat-rate)
+  lock_mode = .RESET_CAPPED,
+}
+
+// -- styling --
 ColorScheme :: enum { SAPHIRE, RUBY, EMERALD, AMETHYST, CHERRY, TOOTHPASTE, ASH, WINE, BUBBLEGUM, CHARCOAL }
-
 FrameStyle :: struct { edge, corner: [2]int }
-FRAME_GAME :: FrameStyle{ edge = {2, 3}, corner = {1, 3} }
-FRAME_INFO :: FrameStyle{ edge = {4, 3}, corner = {3, 3} }
 
-PanelID :: enum { HOLD, BOARD, NEXT, STATS, LINES }
+FRAME_GAME :: FrameStyle{ edge = {2, 5}, corner = {1, 5} }
+FRAME_INFO :: FrameStyle{ edge = {4, 5}, corner = {3, 5} }
+
+PanelID :: enum { HOLD, BOARD, NEXT, STATS, LINES, MENU }
 Panel :: struct { bounds: rl.Rectangle, style: FrameStyle }
 
-TetrominoType :: enum { I, J, L, O, S, T, Z }
-Tetromino :: struct {
-  type : TetrominoType,
-  box_sz : i32,
-  minos : [4][2]i32, // offsets from pos
-  pos : [2]i32,
-  rot_state : i32, // [0..3]
-  accum_y: f32,
-  lock_timer_ms : f32, lock_resets : i32,
-}
+ASCII_MAX :: 256
 
 // https://tetris.wiki/Super_Rotation_System (we invert y's because +y is down for us)
 // SRS wall kick tables: [rot_state][0:CCW, 1:CW][kick_test]
@@ -98,6 +108,17 @@ KICKS_I := [4][2][5][2]i32{
    {{ 0, 0}, {+1, 0}, {-2, 0}, {+1,+2}, {-2,-1}},}, // 3 -> R
 }
 
+TetrominoType :: enum { I, J, L, O, S, T, Z }
+Tetromino :: struct {
+  type : TetrominoType,
+  box_sz : i32,
+  minos : [4][2]i32, // offsets from pos
+  pos : [2]i32,
+  rot_state : i32, // [0..3]
+  accum_y: f32,
+  lock_timer_ms : f32, lock_resets : i32,
+}
+
 @(rodata)
 TETROS : [TetrominoType]Tetromino = {
   .I = { type = .I, box_sz = 4, minos = {{0,1},{1,1},{2,1},{3,1}} },
@@ -109,12 +130,11 @@ TETROS : [TetrominoType]Tetromino = {
   .Z = { type = .Z, box_sz = 3, minos = {{0,0},{1,0},{1,1},{2,1}} },
 }
 
-ATLAS_MINOS_OFFSET_Y_UNITS :: 4
-atlas_tex : rl.Texture2D
-font_map: [256][2]int
-ui_panels: [PanelID]Panel
+State :: struct {
+  mode: ProgramMode,
+  config: Config,
+  menu_idx: int,
 
-state : struct {
   cur, hold : Tetromino,
   hold_locked, is_holding_tetro : bool,
   next : [3]Tetromino,
@@ -132,6 +152,12 @@ state : struct {
   theme: ColorScheme,
   zoom: f32,
 }
+
+// -- mutable globals --
+state : State
+atlas_tex : rl.Texture2D
+font_map: [ASCII_MAX][2]int
+ui_panels: [PanelID]Panel
 
 load_high_score :: proc() {
 	data, err := os.read_entire_file(HIGH_SCORE_FILE, context.allocator)
@@ -157,38 +183,53 @@ save_high_score :: proc() {
   fmt.printfln("Saved highscore %d to file: %s.", state.high_score, HIGH_SCORE_FILE)
 }
 
+reset_state :: proc(first_time_init: bool) {
+  old := state
+  state = {}
+  state.config = first_time_init ? DEFAULT_CONFIG: old.config
+  state.zoom = first_time_init ? 1.0: old.zoom
+  state.theme = first_time_init ? .CHERRY: old.theme
+  state.high_score = old.high_score
+  if first_time_init {
+    load_high_score()
+  }
+  for &t in state.next {
+    t = spawn_tetro()
+  }
+  state.cur = pop_next()
+}
+
 init_game :: proc() {
   init_ui :: proc() {
-    font_lines := [3]string{"ABCDEFGHIJKLMNOP", "QRSTUVWXYZ.!?-: ", "0123456789"}
+    font_lines := [5]string{"ABCDEFGHIJKLMNOP", "QRSTUVWXYZ_ ", "abcdefghijklmnop", "qrstuvwxyz/\\[]=%", "0123456789.!?-:>"}
+    for &i in font_map {
+      i = {-1, -1}
+    }
     for y in 0..<len(font_lines) {
       for c, x in font_lines[y] {
-        if int(c) < 256 do font_map[int(c)] = {x, y};
+        if int(c) < ASCII_MAX {
+          font_map[int(c)] = {x, y};
+        }
       }
     }
 
     // setup absolute bounds for each panel
+    menu_w, menu_h : f32 = 25*unit_sz, len(MenuOption)*12+unit_sz*4
     ui_panels = {
       .LINES = { rl.Rectangle{sx, sy - 4*unit_sz, g_width, unit_sz}, FRAME_INFO },
       .BOARD = { rl.Rectangle{sx, sy, g_width, g_height}, FRAME_GAME },
       .HOLD  = { rl.Rectangle{sx - 7*unit_sz, sy, 4*unit_sz, 4*unit_sz}, FRAME_GAME },
       .STATS = { rl.Rectangle{sx - 9*unit_sz, sy+g_height-9*unit_sz, 6*unit_sz, 9*unit_sz}, FRAME_INFO },
       .NEXT  = { rl.Rectangle{sx + g_width + 3*unit_sz, sy, 4*unit_sz, 11*unit_sz}, FRAME_GAME },
+      .MENU  = { rl.Rectangle{f32((RENDER_WIDTH_PX-menu_w)/2), f32((RENDER_HEIGHT_PX-menu_h)/2), menu_w, menu_h}, FRAME_GAME },
     }
   }
 
-  load_high_score()
   init_ui()
   atlas_tex = rl.LoadTexture("res/atlas.png")
   rl.SetTextureFilter(atlas_tex, .POINT)
 
-  state.bag = {}
-  state.first_piece_drawn = false
-  state.zoom = 1.0
-
-  for &t in state.next {
-    t = spawn_tetro()
-  }
-  state.cur = pop_next()
+  reset_state(true)
 }
 
 // random generator
@@ -208,7 +249,6 @@ spawn_tetro :: proc() -> Tetromino {
 
   assert(ok)
   state.bag -= { t_type }
-  when DBG do fmt.printfln("Bag: %v", state.bag);
   t := TETROS[t_type]
   // t.pos.x = rand.int32_range(0, GRID_WIDTH_UNITS-TETROS[t_type].box_sz+1)
   t.pos.x = (t_type == .O) ? 4 : 3 // start in the center
@@ -281,13 +321,13 @@ try_rotate :: proc(clockwise: bool) -> bool {
 }
 
 trigger_lock_reset :: proc() {
-  if LOCK_MODE == .GRAVITY || LOCK_MODE == .TIME_BASED {
+  if state.config.lock_mode == .GRAVITY || state.config.lock_mode == .TIME_BASED {
     return
   }
   if is_grounded() {
-    if LOCK_MODE == .MOVE_RESET_INFINITE {
+    if state.config.lock_mode == .RESET_INFINITE {
       state.cur.lock_timer_ms = 0.0
-    } else if LOCK_MODE == .MOVE_RESET_CAPPED {
+    } else if state.config.lock_mode == .RESET_CAPPED {
       fmt.printfln("reset: %v/%v", state.cur.lock_resets, MAX_LOCK_RESETS)
       if state.cur.lock_resets < MAX_LOCK_RESETS {
         state.cur.lock_timer_ms = 0.0
@@ -385,6 +425,7 @@ tick :: proc(dt_s, dt_ms: f32, is_soft_dropping: bool) {
   }
 }
 
+// -- rendering --
 atlas_render_sprite :: proc(src_x, src_y: int, dst: rl.Vector2, c: rl.Color = rl.WHITE) {
   src_rec := rl.Rectangle { f32(src_x*unit_sz), f32(src_y*unit_sz), unit_sz, unit_sz }
   rl.DrawTextureRec(atlas_tex, src_rec, dst, c)
@@ -392,7 +433,7 @@ atlas_render_sprite :: proc(src_x, src_y: int, dst: rl.Vector2, c: rl.Color = rl
 
 render_mino_absolute :: proc(px, py: f32, type: TetrominoType) {
   src_x := 0
-  src_y := ATLAS_MINOS_OFFSET_Y_UNITS + int(state.theme)
+  src_y := 6 + int(state.theme) // ATLAS_MINOS_OFFSET_Y_UNITS :: 6
   switch type {
   case .L, .S: src_x = 0
   case .Z, .J: src_x = 1
@@ -417,7 +458,7 @@ render_ghost :: proc(t: ^Tetromino) {
     ghost_y += 1
   }
   for &p in t.minos {
-    atlas_render_sprite(0, 3, {f32(sx+(t.pos.x+p.x)*unit_sz), f32(sy+(ghost_y+p.y)*unit_sz)})
+    atlas_render_sprite(0, 5, {f32(sx+(t.pos.x+p.x)*unit_sz), f32(sy+(ghost_y+p.y)*unit_sz)})
   }
 }
 
@@ -427,60 +468,51 @@ render_tetro :: proc(t: ^Tetromino) {
   }
 }
 
+render_str :: proc(s: string, x, y: f32, c: rl.Color = rl.WHITE) {
+  find_char :: proc(c: rune) -> (src_x, src_y: int) {
+    idx := c < ASCII_MAX ? c : '?'
+    cx, cy := font_map[idx].x, font_map[idx].y
+    if cx == -1 || cy == -1 {
+      return find_char('?')
+    }
+    return cx, cy
+  }
+
+  dst_x, dst_y := x, y
+  for ch in s {
+    if ch == '\n' {
+      dst_y += 9
+      dst_x = x
+    } else {
+      src_x, src_y := find_char(ch)
+      atlas_render_sprite(src_x, src_y, {dst_x, dst_y}, c)
+      dst_x += 8
+    }
+  }
+}
+
+render_panel :: proc(p: ^Panel) {
+  bx, by, bw, bh := p.bounds.x, p.bounds.y, p.bounds.width, p.bounds.height
+
+  rl.DrawRectangleV({bx - unit_sz, by - unit_sz}, {bw + unit_sz*2, bh + unit_sz*2}, rl.BLACK)
+
+  ex, ey := f32(p.style.edge.x)*unit_sz, f32(p.style.edge.y)*unit_sz
+  cx, cy := f32(p.style.corner.x)*unit_sz, f32(p.style.corner.y)*unit_sz
+
+  // draw edges (stretch)
+  rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, unit_sz}, {bx, by - unit_sz, bw, unit_sz}, {0,0}, 0.0, rl.WHITE)
+  rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, -unit_sz}, {bx, by + bh, bw, unit_sz}, {0,0}, 0.0, rl.WHITE)
+  rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, unit_sz}, {bx - unit_sz, by + bh, bh, unit_sz}, {0,0}, -90.0, rl.WHITE)
+  rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, -unit_sz}, {bx + bw, by + bh, bh, unit_sz}, {0,0}, -90.0, rl.WHITE)
+
+  // draw corners
+  rl.DrawTextureRec(atlas_tex, {cx, cy, unit_sz, unit_sz}, {bx - unit_sz, by - unit_sz}, rl.WHITE)
+  rl.DrawTextureRec(atlas_tex, {cx, cy, -unit_sz, unit_sz}, {bx + bw, by - unit_sz}, rl.WHITE)
+  rl.DrawTextureRec(atlas_tex, {cx, cy, unit_sz, -unit_sz}, {bx - unit_sz, by + bh}, rl.WHITE)
+  rl.DrawTextureRec(atlas_tex, {cx, cy, -unit_sz, -unit_sz}, {bx + bw, by + bh}, rl.WHITE)
+}
+
 render_ui :: proc() {
-  render_panel :: proc(p: ^Panel) {
-    bx, by, bw, bh := p.bounds.x, p.bounds.y, p.bounds.width, p.bounds.height
-
-    rl.DrawRectangleV({bx - unit_sz, by - unit_sz}, {bw + unit_sz*2, bh + unit_sz*2}, rl.BLACK)
-
-    ex, ey := f32(p.style.edge.x)*unit_sz, f32(p.style.edge.y)*unit_sz
-    cx, cy := f32(p.style.corner.x)*unit_sz, f32(p.style.corner.y)*unit_sz
-
-    // draw edges (stretch)
-    rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, unit_sz}, {bx, by - unit_sz, bw, unit_sz}, {0,0}, 0.0, rl.WHITE)
-    rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, -unit_sz}, {bx, by + bh, bw, unit_sz}, {0,0}, 0.0, rl.WHITE)
-    rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, unit_sz}, {bx - unit_sz, by + bh, bh, unit_sz}, {0,0}, -90.0, rl.WHITE)
-    rl.DrawTexturePro(atlas_tex, {ex, ey, unit_sz, -unit_sz}, {bx + bw, by + bh, bh, unit_sz}, {0,0}, -90.0, rl.WHITE)
-
-    // draw corners
-    rl.DrawTextureRec(atlas_tex, {cx, cy, unit_sz, unit_sz}, {bx - unit_sz, by - unit_sz}, rl.WHITE)
-    rl.DrawTextureRec(atlas_tex, {cx, cy, -unit_sz, unit_sz}, {bx + bw, by - unit_sz}, rl.WHITE)
-    rl.DrawTextureRec(atlas_tex, {cx, cy, unit_sz, -unit_sz}, {bx - unit_sz, by + bh}, rl.WHITE)
-    rl.DrawTextureRec(atlas_tex, {cx, cy, -unit_sz, -unit_sz}, {bx + bw, by + bh}, rl.WHITE)
-  }
-
-  render_str :: proc(s: string, x, y: f32) {
-    find_char :: proc(c: rune) -> (src_x, src_y: int) {
-      idx := c < 256 ? c : '?'
-      return font_map[idx].x, font_map[idx].y
-    }
-
-    dst_x, dst_y := x, y
-    for c in s {
-      if c == '\n' {
-        dst_y += 9
-        dst_x = x
-      } else {
-        src_x, src_y := find_char(c)
-        atlas_render_sprite(src_x, src_y, {dst_x, dst_y}, rl.WHITE)
-        dst_x += 8
-      }
-    }
-  }
-
-  for &p in ui_panels {
-    render_panel(&p)
-  }
-  buf: [64]byte
-  stats_str := fmt.bprintf(buf[:], "TOP\n%06d\n\nSCORE\n%06d\n\nLEVEL\n%06d", state.high_score, state.score, state.level)
-  render_str(stats_str, ui_panels[.STATS].bounds.x, ui_panels[.STATS].bounds.y)
-
-  render_str("HOLD", ui_panels[.HOLD].bounds.x, ui_panels[.HOLD].bounds.y)
-  render_str("NEXT", ui_panels[.NEXT].bounds.x, ui_panels[.NEXT].bounds.y)
-
-  lines_str := fmt.bprintf(buf[:], "LINES-%0*d", (GRID_WIDTH_UNITS >= 10 ? 4: GRID_WIDTH_UNITS == 9 ? 3: 2), state.lines)
-  render_str(lines_str, ui_panels[.LINES].bounds.x, ui_panels[.LINES].bounds.y)
-
   render_tetro_centered :: proc(panel_id: PanelID, t: ^Tetromino, y_offset_units: f32) {
     panel := ui_panels[panel_id]
     center_x := panel.bounds.x + (panel.bounds.width / 2.0)
@@ -491,19 +523,80 @@ render_ui :: proc() {
     }
   }
 
-  if state.is_holding_tetro {
-    render_tetro_centered(.HOLD, &state.hold, 1.5)
-  }
+  render_panel(&ui_panels[.BOARD])
+  render_str("X", OPTION_MENU_ICON.x, OPTION_MENU_ICON.y)
 
-  for &t, i in state.next {
-    render_tetro_centered(.NEXT, &t, f32(i * 3 + 2))
+  if state.config.show_all_ui {
+    render_panel(&ui_panels[.LINES])
+    render_panel(&ui_panels[.HOLD])
+    render_panel(&ui_panels[.STATS])
+
+    buf: [64]byte
+    stats_str := fmt.bprintf(buf[:], "TOP\n%06d\n\nSCORE\n%06d\n\nLEVEL\n%06d", state.high_score, state.score, state.level)
+    render_str(stats_str, ui_panels[.STATS].bounds.x, ui_panels[.STATS].bounds.y)
+    render_str("HOLD", ui_panels[.HOLD].bounds.x, ui_panels[.HOLD].bounds.y)
+
+    lines_str := fmt.bprintf(buf[:], "LINES-%0*d", (GRID_WIDTH_UNITS >= 10 ? 4: GRID_WIDTH_UNITS == 9 ? 3: 2), state.lines)
+    render_str(lines_str, ui_panels[.LINES].bounds.x, ui_panels[.LINES].bounds.y)
+
+    if state.is_holding_tetro {
+      render_tetro_centered(.HOLD, &state.hold, 1.5)
+    }
+
+    if state.config.show_next {
+      render_panel(&ui_panels[.NEXT])
+      render_str("NEXT", ui_panels[.NEXT].bounds.x, ui_panels[.NEXT].bounds.y)
+      for &t, i in state.next {
+        if i >= state.config.num_next {
+          break
+        }
+        render_tetro_centered(.NEXT, &t, f32(i*3+2))
+      }
+    }
   }
+}
+
+render_menu :: proc() {
+  rl.DrawRectangle(0, 0, i32(RENDER_WIDTH_PX), i32(RENDER_HEIGHT_PX), {0, 0, 0, 210})
+  render_panel(&ui_panels[.MENU])
+
+  menu_text_x := ui_panels[.MENU].bounds.x+16.0
+  menu_text_y := ui_panels[.MENU].bounds.y+12.0
+
+  buf: [128]byte
+  hover_buf: [128]byte
+  for o, i in MenuOption {
+    str: string
+    switch MenuOption(i) {
+    case .GHOST: str = fmt.bprintf(buf[:], "GHOST: %s", state.config.show_ghost ? "ON":"OFF")
+    case .VFX: str = fmt.bprintf(buf[:], "VFX: %s", state.config.vfx_enabled ? "ON":"OFF")
+    case .SFX: str = fmt.bprintf(buf[:], "SFX: %s", state.config.sfx_enabled ? "ON":"OFF")
+    case .SHOW_UI: str = fmt.bprintf(buf[:], "SHOW UI: %s", state.config.show_all_ui ? "ON":"OFF")
+    case .SHOW_NEXT: str = fmt.bprintf(buf[:], "SHOW NEXT: %s", state.config.show_next ? "ON":"OFF")
+    case .NUM_NEXT_PREVIEW: str = fmt.bprintf(buf[:], "NEXT PREVIEWS: %d", state.config.num_next)
+    case .DAS_MS: str = fmt.bprintf(buf[:], "DAS MS: %.0f", state.config.das_ms)
+    case .ARR_MS: str = fmt.bprintf(buf[:], "ARR MS: %.0f", state.config.arr_ms)
+    case .LOCK_MODE: str = fmt.bprintf(buf[:], "LOCK: %s", state.config.lock_mode)
+    case .MOUSE_CTRL: str = fmt.bprintf(buf[:], "MOUSE: %s", state.config.mouse_enabled ? "ON":"OFF")
+    case .RESET_CFG: str = "RESET CONFIG"
+    case .RESTART: str = "RESTART GAME"
+    case .RESET_HS: str = "RESET HIGHSCORE"
+    }
+    color := (i == state.menu_idx) ? rl.YELLOW : rl.WHITE
+    if i == state.menu_idx {
+      str = fmt.bprintf(hover_buf[:], "> %s", str)
+    }
+    render_str(str, menu_text_x, menu_text_y + f32(i*8), color)
+  }
+  keybinds := "L/R: Move\nDOWN: Soft\nSPC/L-CLK: Hard\nC/M-CLK: Hold\nUP/X: Rot R    Z: Rot L\nESC/O: Menu    -/=: Zoom"
+  render_str(keybinds, ui_panels[.MENU].bounds.x, ui_panels[.MENU].bounds.y+ui_panels[.MENU].bounds.height-unit_sz*7, rl.LIGHTGRAY)
 }
 
 main :: proc() {
   rl.SetConfigFlags({.WINDOW_RESIZABLE})
   rl.InitWindow(WINDOW_WIDTH_PX, WINDOW_HEIGHT_PX, "tetris")
   defer rl.CloseWindow()
+  rl.SetExitKey(.KEY_NULL)
 
   init_game()
   defer rl.UnloadTexture(atlas_tex)
@@ -513,7 +606,6 @@ main :: proc() {
   defer rl.UnloadRenderTexture(target)
   rl.SetTextureFilter(target.texture, .POINT)
 
-  dbg_tetros := TETROS
   for !rl.WindowShouldClose() {
     dt_s := rl.GetFrameTime()
     dt_ms := dt_s * 1000.0
@@ -526,95 +618,160 @@ main :: proc() {
     dst_rec_x := (screen_w - (target_w * scale)) * 0.5
     dst_rec_y := (screen_h - (target_h * scale)) * 0.5
 
-    // input gathering
-    pressed_hard_drop := rl.IsKeyPressed(.SPACE) || rl.IsMouseButtonPressed(.LEFT)
-    pressed_rot_cw    := rl.IsKeyPressed(.UP) || rl.IsKeyPressed(.X) || rl.IsMouseButtonPressed(.RIGHT)
-    pressed_rot_ccw   := rl.IsKeyPressed(.Z)
-    pressed_hold      := rl.IsKeyPressed(.C) || rl.IsMouseButtonPressed(.MIDDLE)
-    holding_soft_drop := rl.IsKeyDown(.DOWN)
+    // input gathering (check if we want to enter the menu)
+    mouse_pos := rl.GetMousePosition()
+    canvas_mouse_x := (mouse_pos.x - dst_rec_x) / scale
+    canvas_mouse_y := (mouse_pos.y - dst_rec_y) / scale
+    mouse_click := rl.IsMouseButtonPressed(.LEFT)
 
-    // handle mouse input
-    mouse_delta := rl.GetMouseDelta()
-    if mouse_delta.x != 0.0 || mouse_delta.y != 0.0 {
-      // un-project window pixel to canvas pixel, then map to grid x
-      canvas_x := (f32(rl.GetMouseX()) - dst_rec_x) / scale
-      grid_x := i32(math.floor((canvas_x - sx) / unit_sz))
-
-      // offset by the bounding box to center the piece on the cursor
-      target_x := grid_x - (state.cur.box_sz / 2)
-      for state.cur.pos.x < target_x {
-        if !try_move(1, 0) do break;
-      }
-      for state.cur.pos.x > target_x {
-        if !try_move(-1, 0) do break;
-      }
+    if rl.IsKeyPressed(.ESCAPE) || rl.IsKeyPressed(.O) || (mouse_click && rl.CheckCollisionPointRec({canvas_mouse_x, canvas_mouse_y}, OPTION_MENU_ICON)) {
+      state.mode = state.mode == .PLAYING ? .MENU : .PLAYING
+      mouse_click = false
     }
 
-    // handle verticle movement and rotations
-    if pressed_hard_drop {
-      drop_distance : i32 = 0
-      for is_valid_placement(state.cur.pos.x, state.cur.pos.y+1, state.cur.minos[:]) {
-        state.cur.pos.y += 1
-        drop_distance += 1
+    if state.mode == .MENU {
+      mouse_delta := rl.GetMouseDelta()
+      if mouse_delta.x != 0 || mouse_delta.y != 0 {
+        menu_text_y := ui_panels[.MENU].bounds.y + 12.0
+        my := canvas_mouse_y - menu_text_y
+        if my >= 0 && my < f32(len(MenuOption)*8) {
+          state.menu_idx = int(my/8)
+        }
       }
-      state.score += drop_distance * SCORE_HARD_DROP
-      lock_tetro()
-      state.cur = pop_next()
-    }
-    // soft drop is handled in the tick() call
 
-    if pressed_rot_cw do try_rotate(true);
-    if pressed_rot_ccw do try_rotate(false);
+      // keyboard movement on menu
+      if rl.IsKeyPressed(.DOWN) {
+        state.menu_idx = (state.menu_idx+1) % len(MenuOption)
+      }
+      if rl.IsKeyPressed(.UP) {
+        state.menu_idx = (state.menu_idx-1+len(MenuOption)) % len(MenuOption)
+      }
 
-    // handle horizontal movement
-    first_left, first_right := rl.IsKeyPressed(.LEFT), rl.IsKeyPressed(.RIGHT)
-    left_down, right_down := rl.IsKeyDown(.LEFT), rl.IsKeyDown(.RIGHT)
-    if first_left {
-      state.active_dir = -1
-      state.das_timer_ms, state.arr_timer_ms = 0.0, 0.0
-      try_move(-1, 0)
-    } else if first_right {
-      state.active_dir = 1
-      state.das_timer_ms, state.arr_timer_ms = 0.0, 0.0
-      try_move(1, 0)
-    }
-
-    is_active_key_held := (state.active_dir == -1 && left_down) || (state.active_dir == 1 && right_down)
-    if is_active_key_held {
-      state.das_timer_ms += dt_ms
-      if state.das_timer_ms >= DAS_DELAY_MS {
-        state.arr_timer_ms += dt_ms
-        for state.arr_timer_ms >= ARR_DELAY_MS {
-          try_move(state.active_dir, 0)
-          state.arr_timer_ms -= ARR_DELAY_MS
+      dir := -1 if rl.IsKeyPressed(.LEFT) else 1 if rl.IsKeyPressed(.RIGHT) else 0
+      action := rl.IsKeyPressed(.ENTER) || rl.IsKeyPressed(.SPACE) || mouse_click
+      if dir != 0 || action {
+        switch MenuOption(state.menu_idx) {
+        case .GHOST: state.config.show_ghost = !state.config.show_ghost
+        case .VFX: state.config.vfx_enabled = !state.config.vfx_enabled
+        case .SFX: state.config.sfx_enabled = !state.config.sfx_enabled
+        case .SHOW_UI: state.config.show_all_ui = !state.config.show_all_ui
+        case .SHOW_NEXT: state.config.show_next = !state.config.show_next
+        case .NUM_NEXT_PREVIEW:
+          state.config.num_next = ((state.config.num_next - 1 + (dir == 0 ? 1 : dir) + 3) % 3) + 1
+        case .DAS_MS:
+          state.config.das_ms = clamp(state.config.das_ms + f32((dir == 0 ? 1: dir) * 10), 20, 500)
+        case .ARR_MS:
+          state.config.arr_ms = clamp(state.config.arr_ms + f32((dir == 0 ? 1: dir) * 5), 20, 500)
+        case .LOCK_MODE:
+          val := int(state.config.lock_mode) + (dir == 0 ? 1: dir)
+          val = (val < 0 ? 3: val > 3 ? 0: val)
+          state.config.lock_mode = LockDelayMode(val)
+        case .MOUSE_CTRL: state.config.mouse_enabled = !state.config.mouse_enabled
+        case .RESET_CFG: if action { state.config = DEFAULT_CONFIG }
+        case .RESTART:
+          if action {
+            reset_state(false)
+          }
+        case .RESET_HS:
+          if action {
+            state.high_score = 0
+            save_high_score()
+          }
         }
       }
     } else {
-      state.active_dir = 0
-      // check if the inactive direction is being held
-      if left_down {
-        state.active_dir = -1
-        state.das_timer_ms = DAS_DELAY_MS
-      } else if right_down {
-        state.active_dir = 1
-        state.das_timer_ms = DAS_DELAY_MS
-      }
-    }
+      // input gathering
+      pressed_hard_drop := rl.IsKeyPressed(.SPACE) || rl.IsMouseButtonPressed(.LEFT)
+      pressed_rot_cw    := rl.IsKeyPressed(.UP) || rl.IsKeyPressed(.X) || rl.IsMouseButtonPressed(.RIGHT)
+      pressed_rot_ccw   := rl.IsKeyPressed(.Z)
+      pressed_hold      := rl.IsKeyPressed(.C) || rl.IsMouseButtonPressed(.MIDDLE)
+      holding_soft_drop := rl.IsKeyDown(.DOWN)
 
-    // handle holding swap
-    if pressed_hold {
-      if !state.hold_locked {
-        if state.is_holding_tetro {
-          state.hold, state.cur = TETROS[state.cur.type], state.hold
-        } else {
-          state.hold = TETROS[state.cur.type]
-          state.cur = pop_next()
-          state.is_holding_tetro = true
+      // handle mouse input
+      if state.config.mouse_enabled {
+        mouse_delta := rl.GetMouseDelta()
+        if mouse_delta.x != 0.0 || mouse_delta.y != 0.0 {
+          // un-project window pixel to canvas pixel, then map to grid x.
+          // offset by the bounding box to center the piece on the cursor.
+          grid_x := i32(math.floor((canvas_mouse_x - sx) / unit_sz))
+          target_x := grid_x - (state.cur.box_sz / 2)
+          for state.cur.pos.x < target_x {
+            if !try_move(1, 0) do break
+          }
+          for state.cur.pos.x > target_x {
+            if !try_move(-1, 0) do break
+          }
         }
-        state.hold_locked = true
-        state.cur.accum_y = 0.0
-        state.cur.lock_timer_ms = 0.0
       }
+
+      // handle verticle movement and rotations
+      if pressed_hard_drop {
+        drop_distance : i32 = 0
+        for is_valid_placement(state.cur.pos.x, state.cur.pos.y+1, state.cur.minos[:]) {
+          state.cur.pos.y += 1
+          drop_distance += 1
+        }
+        state.score += drop_distance * SCORE_HARD_DROP
+        lock_tetro()
+        state.cur = pop_next()
+      }
+      // soft drop is handled in the tick() call
+
+      if pressed_rot_cw do try_rotate(true);
+      if pressed_rot_ccw do try_rotate(false);
+
+      // handle horizontal movement
+      first_left, first_right := rl.IsKeyPressed(.LEFT), rl.IsKeyPressed(.RIGHT)
+      left_down, right_down := rl.IsKeyDown(.LEFT), rl.IsKeyDown(.RIGHT)
+      if first_left {
+        state.active_dir = -1
+        state.das_timer_ms, state.arr_timer_ms = 0.0, 0.0
+        try_move(-1, 0)
+      } else if first_right {
+        state.active_dir = 1
+        state.das_timer_ms, state.arr_timer_ms = 0.0, 0.0
+        try_move(1, 0)
+      }
+
+      is_active_key_held := (state.active_dir == -1 && left_down) || (state.active_dir == 1 && right_down)
+      if is_active_key_held {
+        state.das_timer_ms += dt_ms
+        if state.das_timer_ms >= state.config.das_ms {
+          state.arr_timer_ms += dt_ms
+          for state.arr_timer_ms >= state.config.arr_ms {
+            try_move(state.active_dir, 0)
+            state.arr_timer_ms -= state.config.arr_ms
+          }
+        }
+      } else {
+        state.active_dir = 0
+        // check if the inactive direction is being held
+        if left_down {
+          state.active_dir = -1
+          state.das_timer_ms = state.config.das_ms
+        } else if right_down {
+          state.active_dir = 1
+          state.das_timer_ms = state.config.das_ms
+        }
+      }
+
+      // handle holding swap
+      if pressed_hold {
+        if !state.hold_locked {
+          if state.is_holding_tetro {
+            state.hold, state.cur = TETROS[state.cur.type], state.hold
+          } else {
+            state.hold = TETROS[state.cur.type]
+            state.cur = pop_next()
+            state.is_holding_tetro = true
+          }
+          state.hold_locked = true
+          state.cur.accum_y = 0.0
+          state.cur.lock_timer_ms = 0.0
+        }
+      }
+
+      tick(dt_s, dt_ms, holding_soft_drop)
     }
 
     // handle zoom in and zoom out
@@ -624,23 +781,28 @@ main :: proc() {
       state.zoom = min(4.0, state.zoom + 0.25)
     }
 
-    tick(dt_s, dt_ms, holding_soft_drop)
-
     // first pass drawing (render to canvas)
     rl.BeginTextureMode(target)
     rl.ClearBackground(BG_COLOR)
 
     render_ui()
     render_playfield()
-    render_ghost(&state.cur)
+    if state.config.show_ghost {
+      render_ghost(&state.cur)
+    }
     render_tetro(&state.cur)
 
-    when DBG {
+    if state.config.show_all_ui {
+      dbg_tetros := TETROS
       for &t, i in dbg_tetros {
         idx := i32(i)
         t.pos = {(idx<4?12:17), i32((idx<4?idx*3:(idx-3)*3))+12}
         render_tetro(&t)
       }
+    }
+
+    if state.mode == .MENU {
+      render_menu()
     }
 
     rl.EndTextureMode()
