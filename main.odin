@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:math"
 import "core:math/rand"
 import rl "vendor:raylib"
 
@@ -123,7 +124,7 @@ init_game :: proc() {
     font_lines := [3]string{"ABCDEFGHIJKLMNOP", "QRSTUVWXYZ.!?-: ", "0123456789"}
     for y in 0..<len(font_lines) {
       for c, x in font_lines[y] {
-        if int(c) < 256 do font_map[int(c)] = {x, y}
+        if int(c) < 256 do font_map[int(c)] = {x, y};
       }
     }
 
@@ -168,7 +169,7 @@ spawn_tetro :: proc() -> Tetromino {
 
   assert(ok)
   state.bag -= { t_type }
-  when DBG do fmt.printfln("Bag: %v", state.bag)
+  when DBG do fmt.printfln("Bag: %v", state.bag);
   t := TETROS[t_type]
   // t.pos.x = rand.int32_range(0, GRID_WIDTH_UNITS-TETROS[t_type].box_sz+1)
   t.pos.x = (t_type == .O) ? 4 : 3 // start in the center
@@ -452,8 +453,40 @@ main :: proc() {
     dt_s := rl.GetFrameTime()
     dt_ms := dt_s * 1000.0
 
-    // input handling
-    if rl.IsKeyPressed(.SPACE) {
+    screen_w, screen_h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
+    target_w, target_h := f32(RENDER_WIDTH_PX), f32(RENDER_HEIGHT_PX)
+
+    base_scale := min(screen_w/target_w, screen_h/target_h)
+    scale := base_scale * state.zoom
+    dst_rec_x := (screen_w - (target_w * scale)) * 0.5
+    dst_rec_y := (screen_h - (target_h * scale)) * 0.5
+
+    // input gathering
+    pressed_hard_drop := rl.IsKeyPressed(.SPACE) || rl.IsMouseButtonPressed(.LEFT)
+    pressed_rot_cw    := rl.IsKeyPressed(.UP) || rl.IsKeyPressed(.X) || rl.IsMouseButtonPressed(.RIGHT)
+    pressed_rot_ccw   := rl.IsKeyPressed(.Z)
+    pressed_hold      := rl.IsKeyPressed(.C) || rl.IsMouseButtonPressed(.MIDDLE)
+    holding_soft_drop := rl.IsKeyDown(.DOWN)
+
+    // handle mouse input
+    mouse_delta := rl.GetMouseDelta()
+    if mouse_delta.x != 0.0 || mouse_delta.y != 0.0 {
+      // un-project window pixel to canvas pixel, then map to grid x
+      canvas_x := (f32(rl.GetMouseX()) - dst_rec_x) / scale
+      grid_x := i32(math.floor((canvas_x - sx) / unit_sz))
+
+      // offset by the bounding box to center the piece on the cursor
+      target_x := grid_x - (state.cur.box_sz / 2)
+      for state.cur.pos.x < target_x {
+        if !try_move(1, 0) do break;
+      }
+      for state.cur.pos.x > target_x {
+        if !try_move(-1, 0) do break;
+      }
+    }
+
+    // handle verticle movement and rotations
+    if pressed_hard_drop {
       for is_valid_placement(state.cur.pos.x, state.cur.pos.y+1, state.cur.minos[:]) {
         state.cur.pos.y += 1
       }
@@ -461,16 +494,14 @@ main :: proc() {
       state.cur = pop_next()
     }
 
-    if rl.IsKeyPressed(.UP) || rl.IsKeyPressed(.X) {
-      try_rotate(true)
-    } else if rl.IsKeyPressed(.Z) {
-      try_rotate(false)
-    }
+    if pressed_rot_cw do try_rotate(true);
+    if pressed_rot_ccw do try_rotate(false);
 
-    if rl.IsKeyDown(.DOWN) {
+    if holding_soft_drop {
       state.cur.accum_y += SOFT_SPEED*dt_s
     }
 
+    // handle horizontal movement
     first_left, first_right := rl.IsKeyPressed(.LEFT), rl.IsKeyPressed(.RIGHT)
     left_down, right_down := rl.IsKeyDown(.LEFT), rl.IsKeyDown(.RIGHT)
     if first_left {
@@ -505,7 +536,8 @@ main :: proc() {
       }
     }
 
-    if rl.IsKeyPressed(.C) {
+    // handle holding swap
+    if pressed_hold {
       if !state.hold_locked {
         if state.is_holding_tetro {
           state.hold, state.cur = TETROS[state.cur.type], state.hold
@@ -549,19 +581,8 @@ main :: proc() {
     rl.EndTextureMode()
 
     // second pass drawing (scale canvas to screen)
-    screen_w, screen_h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
-    target_w, target_h := f32(RENDER_WIDTH_PX), f32(RENDER_HEIGHT_PX)
-
-    base_scale := min(screen_w/target_w, screen_h/target_h)
-    scale := base_scale * state.zoom
-
     source_rec := rl.Rectangle{0, 0, target_w, -target_h}
-    dst_rec := rl.Rectangle{
-      x = (screen_w - (target_w * scale)) * 0.5,
-      y = (screen_h - (target_h * scale)) * 0.5,
-      width = target_w * scale,
-      height = target_h * scale,
-    }
+    dst_rec := rl.Rectangle{ x = dst_rec_x, y = dst_rec_y, width = target_w * scale, height = target_h * scale }
 
     rl.BeginDrawing()
     rl.ClearBackground(BG_COLOR)
