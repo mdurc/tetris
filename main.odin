@@ -1,6 +1,8 @@
 package main
 
 import "core:fmt"
+import "core:os"
+import "core:strconv"
 import "core:math"
 import "core:math/rand"
 import rl "vendor:raylib"
@@ -47,6 +49,7 @@ SCORE_SOFT_DROP :: 1
 SCORE_HARD_DROP :: 2
 LINES_PER_LEVEL :: 10
 SPEED_INCREASE_PER_LEVEL :: 0.5 // Grid cells per second added per level
+HIGH_SCORE_FILE :: "highscore.txt"
 
 LockDelayMode :: enum { GRAVITY, TIME_BASED, MOVE_RESET_CAPPED, MOVE_RESET_INFINITE }
 
@@ -130,6 +133,30 @@ state : struct {
   zoom: f32,
 }
 
+load_high_score :: proc() {
+	data, err := os.read_entire_file(HIGH_SCORE_FILE, context.allocator)
+  if err != nil {
+    fmt.println("ERROR: failed to read file", HIGH_SCORE_FILE)
+    return
+  }
+  defer delete(data, context.allocator)
+  if val, ok := strconv.parse_int(string(data)); ok {
+    state.high_score = i32(val)
+  }
+  fmt.printfln("Parsed highscore %d from %s.", state.high_score, HIGH_SCORE_FILE)
+}
+
+save_high_score :: proc() {
+  buf: [32]byte
+  str := fmt.bprintf(buf[:], "%d", state.high_score)
+  err := os.write_entire_file(HIGH_SCORE_FILE, str)
+  if err != nil {
+    fmt.println("ERROR: failed to write file", HIGH_SCORE_FILE)
+    return
+  }
+  fmt.printfln("Saved highscore %d to file: %s.", state.high_score, HIGH_SCORE_FILE)
+}
+
 init_game :: proc() {
   init_ui :: proc() {
     font_lines := [3]string{"ABCDEFGHIJKLMNOP", "QRSTUVWXYZ.!?-: ", "0123456789"}
@@ -149,6 +176,7 @@ init_game :: proc() {
     }
   }
 
+  load_high_score()
   init_ui()
   atlas_tex = rl.LoadTexture("res/atlas.png")
   rl.SetTextureFilter(atlas_tex, .POINT)
@@ -315,6 +343,7 @@ lock_tetro :: proc() {
 
   if state.score > state.high_score {
     state.high_score = state.score
+    save_high_score()
   }
 }
 
